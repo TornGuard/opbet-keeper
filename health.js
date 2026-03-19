@@ -6,7 +6,7 @@
  */
 
 import http from 'http';
-import { pool, registerBetOwner, getBetsByWallet } from './db.js';
+import { pool, registerBetOwner, getBetsByWallet, getBetsByIds } from './db.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -377,15 +377,24 @@ export function startHealthServer(oracle, resolver) {
         return;
       }
 
-      // ── GET /api/bets?wallet=xxx — fetch bet IDs for a wallet ──
+      // ── GET /api/bets?wallet=xxx — fetch bets registered to a wallet ──
+      // ── GET /api/bets?ids=1,2,3  — fetch bets by specific IDs (localStorage lookup) ──
       if (req.method === 'GET' && url.pathname === '/api/bets') {
         const wallet = url.searchParams.get('wallet');
-        if (!wallet) {
+        const idsParam = url.searchParams.get('ids');
+
+        let bets;
+        if (idsParam) {
+          const ids = idsParam.split(',').map(Number).filter(n => !isNaN(n) && n > 0);
+          bets = await getBetsByIds(ids);
+        } else if (wallet) {
+          bets = await getBetsByWallet(wallet);
+        } else {
           res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'wallet query param is required' }));
+          res.end(JSON.stringify({ error: 'wallet or ids query param required' }));
           return;
         }
-        const bets = await getBetsByWallet(wallet);
+
         res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
         res.end(JSON.stringify(bets));
         return;
