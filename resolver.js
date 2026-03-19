@@ -10,7 +10,7 @@
  */
 
 import { CONFIG } from './config.js';
-import { upsertBet, markBetResolved } from './db.js';
+import { upsertBet, markBetResolved, upsertBetOwner } from './db.js';
 
 const STATUS_ACTIVE = 0n;
 
@@ -105,11 +105,23 @@ export class BetResolver {
         active++;
         const endBlock = Number(info.properties.endBlock);
         const betType = info.properties.betType;
+        const param1 = info.properties.param1;
+        const param2 = info.properties.param2;
         const amount = info.properties.amount;
 
-        // Persist the bet to the database (no-op if already stored)
-        await upsertBet({ betId: i, betType, amount, endBlock })
+        // Persist the bet to the database (no-op if already stored; updates param1/param2 if missing)
+        await upsertBet({ betId: i, betType, param1, param2, amount, endBlock })
           .catch((err) => console.warn('[DB] upsertBet failed:', err.message));
+
+        // Index the bet owner for airdrop tracking
+        try {
+          const ownerResult = await this.contract.getBetOwner(betId);
+          if (!ownerResult.revert && ownerResult.properties.owner > 0n) {
+            const ownerHex = '0x' + ownerResult.properties.owner.toString(16).padStart(64, '0');
+            await upsertBetOwner({ betId: i, ownerHex })
+              .catch((err) => console.warn('[DB] upsertBetOwner failed:', err.message));
+          }
+        } catch { /* non-fatal */ }
 
         // resolveBet needs data for BOTH endBlock AND endBlock-1
         const endBlockData = await this.contract.getBlockData(BigInt(endBlock));
@@ -211,9 +223,10 @@ export class BetResolver {
   }
 
   async _doBackfill(targetBlock) {
-    // Find how far back we need to go (max 50 blocks)
+    // targetBlock is a Bitcoin block height.
+    // Find how far back we need to go (max 10 BTC blocks — ~100 min backfill max)
     let firstMissing = targetBlock;
-    for (let h = targetBlock; h > Math.max(targetBlock - 50, 0); h--) {
+    for (let h = targetBlock; h > Math.max(targetBlock - 10, 0); h--) {
       const data = await this.contract.getBlockData(BigInt(h));
       if (data.properties && data.properties.dataSet && data.properties.dataSet > 0n) {
         firstMissing = h + 1;

@@ -6,7 +6,7 @@
  */
 
 import http from 'http';
-import { pool, registerBetOwner, getBetsByWallet, getBetsByIds } from './db.js';
+import { pool, registerBetOwner, getBetsByWallet, getBetsByIds, getAllBettors } from './db.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -28,6 +28,7 @@ async function getStats(oracle, resolver) {
   const [
     betsResult,
     feedsResult,
+    bettorsResult,
     recentBets,
     recentFeeds,
     feeStats,
@@ -35,6 +36,8 @@ async function getStats(oracle, resolver) {
   ] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM bets'),
     pool.query('SELECT COUNT(*) FROM oracle_feeds'),
+    pool.query('SELECT COUNT(*) FROM bettors'),
+    pool.query('SELECT COUNT(*) FROM bettors'),
     pool.query(`
       SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
       FROM bets ORDER BY bet_id DESC LIMIT 20
@@ -65,6 +68,7 @@ async function getStats(oracle, resolver) {
     neededBlocks: [...oracle.neededBlocks],
     betsTotal: Number(betsResult.rows[0].count),
     betsActive: Number(activeBets.rows[0].count),
+    bettorsTotal: Number(bettorsResult.rows[0].count),
     oracleFeedsTotal: Number(feedsResult.rows[0].count),
     resolvedInMemory: resolver.resolvedIds.size,
     feeStats: feeStats.rows[0],
@@ -400,6 +404,26 @@ export function startHealthServer(oracle, resolver) {
         return;
       }
 
+      // ── GET /api/bettors — all unique bettors (for airdrop) ──
+      if (req.method === 'GET' && url.pathname === '/api/bettors') {
+        const format = url.searchParams.get('format');
+        const bettors = await getAllBettors();
+
+        if (format === 'csv') {
+          const rows = ['owner_hex,wallet,first_bet,last_bet,bet_count'];
+          for (const b of bettors) {
+            rows.push(`${b.owner_hex},${b.wallet || ''},${b.first_bet},${b.last_bet},${b.bet_count}`);
+          }
+          res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'text/csv' });
+          res.end(rows.join('\n'));
+          return;
+        }
+
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(bettors));
+        return;
+      }
+
       // ── GET /health — JSON summary for monitoring ──
       if (req.method === 'GET' && url.pathname === '/health') {
         const stats = await getStats(oracle, resolver);
@@ -430,5 +454,6 @@ export function startHealthServer(oracle, resolver) {
     console.log(`[Health] Dashboard:  http://0.0.0.0:${port}/`);
     console.log(`[Health] JSON API:   http://0.0.0.0:${port}/health`);
     console.log(`[Health] Bets API:   http://0.0.0.0:${port}/api/bets?wallet=<address>`);
+    console.log(`[Health] Bettors:    http://0.0.0.0:${port}/api/bettors`);
   });
 }

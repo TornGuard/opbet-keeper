@@ -64,6 +64,20 @@ export const MARKET_ABI = [
     outputs: [{ name: 'nextBetId', type: 'UINT256' }],
   },
   {
+    name: 'getCurrentBtcBlock',
+    type: 'function',
+    constant: true,
+    inputs: [],
+    outputs: [{ name: 'currentBtcBlock', type: 'UINT256' }],
+  },
+  {
+    name: 'getBetOwner',
+    type: 'function',
+    constant: true,
+    inputs: [{ name: 'betId', type: 'UINT256' }],
+    outputs: [{ name: 'owner', type: 'UINT256' }],
+  },
+  {
     name: 'getPoolInfo',
     type: 'function',
     constant: true,

@@ -20,6 +20,8 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS bets (
       bet_id        INTEGER PRIMARY KEY,
       bet_type      SMALLINT,
+      param1        TEXT,
+      param2        TEXT,
       amount        TEXT,
       end_block     INTEGER,
       status        SMALLINT    NOT NULL DEFAULT 0,
@@ -29,6 +31,16 @@ export async function initDb() {
       placed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       resolved_at   TIMESTAMPTZ,
       resolve_tx    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS bettors (
+      owner_hex  TEXT        PRIMARY KEY,  -- raw on-chain address bytes as 0x hex
+      wallet     TEXT,                     -- p2tr address if registered via frontend
+      first_bet  INTEGER,
+      last_bet   INTEGER,
+      bet_count  INTEGER     NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS oracle_feeds (
@@ -45,6 +57,9 @@ export async function initDb() {
   // Add columns if upgrading from an older schema
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS wallet TEXT;`).catch(() => {});
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS token_symbol TEXT;`).catch(() => {});
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS param1 TEXT;`).catch(() => {});
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS param2 TEXT;`).catch(() => {});
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS owner_hex TEXT;`).catch(() => {});
 
   console.log('[DB] Tables ready');
 }
@@ -52,12 +67,14 @@ export async function initDb() {
 /**
  * Insert a newly discovered active bet (ignore if already known).
  */
-export async function upsertBet({ betId, betType, amount, endBlock }) {
+export async function upsertBet({ betId, betType, param1, param2, amount, endBlock }) {
   await pool.query(
-    `INSERT INTO bets (bet_id, bet_type, amount, end_block)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (bet_id) DO NOTHING`,
-    [betId, Number(betType), amount.toString(), endBlock],
+    `INSERT INTO bets (bet_id, bet_type, param1, param2, amount, end_block)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (bet_id) DO UPDATE
+       SET param1 = COALESCE(EXCLUDED.param1, bets.param1),
+           param2 = COALESCE(EXCLUDED.param2, bets.param2)`,
+    [betId, Number(betType), param1 != null ? param1.toString() : null, param2 != null ? param2.toString() : null, amount.toString(), endBlock],
   );
 }
 
@@ -82,7 +99,7 @@ export async function registerBetOwner({ betId, wallet, tokenSymbol }) {
  */
 export async function getBetsByWallet(wallet) {
   const result = await pool.query(
-    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
      FROM bets
      WHERE wallet = $1
      ORDER BY bet_id DESC`,
@@ -97,7 +114,7 @@ export async function getBetsByWallet(wallet) {
 export async function getBetsByIds(ids) {
   if (!ids || ids.length === 0) return [];
   const result = await pool.query(
-    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
      FROM bets
      WHERE bet_id = ANY($1)
      ORDER BY bet_id DESC`,
@@ -111,7 +128,7 @@ export async function getBetsByIds(ids) {
  */
 export async function getAllBets() {
   const result = await pool.query(
-    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
      FROM bets ORDER BY bet_id DESC`,
   );
   return result.rows;
@@ -127,6 +144,54 @@ export async function markBetResolved({ betId, won, payout, txId }) {
      WHERE bet_id = $1`,
     [betId, Boolean(won), payout != null ? payout.toString() : null, txId ?? null],
   );
+}
+
+/**
+ * Store the on-chain owner (hex bytes) for a bet and upsert into the bettors table.
+ * Called by the keeper when it first scans a bet from chain.
+ */
+export async function upsertBetOwner({ betId, ownerHex }) {
+  // Store owner_hex on the bet row
+  await pool.query(
+    `UPDATE bets SET owner_hex = $1 WHERE bet_id = $2 AND owner_hex IS NULL`,
+    [ownerHex, betId],
+  );
+
+  // Upsert into bettors table — tracks every unique participant for airdrop
+  await pool.query(
+    `INSERT INTO bettors (owner_hex, first_bet, last_bet, bet_count)
+     VALUES ($1, $2, $2, 1)
+     ON CONFLICT (owner_hex) DO UPDATE
+       SET last_bet  = GREATEST(bettors.last_bet, EXCLUDED.last_bet),
+           bet_count = bettors.bet_count + 1,
+           updated_at = NOW()`,
+    [ownerHex, betId],
+  );
+}
+
+/**
+ * Link a p2tr wallet address to an on-chain owner_hex (when user registers via frontend).
+ */
+export async function linkBettorWallet({ ownerHex, wallet }) {
+  await pool.query(
+    `INSERT INTO bettors (owner_hex, wallet, first_bet, last_bet, bet_count)
+     VALUES ($1, $2, 0, 0, 0)
+     ON CONFLICT (owner_hex) DO UPDATE
+       SET wallet = COALESCE(EXCLUDED.wallet, bettors.wallet)`,
+    [ownerHex, wallet.toLowerCase()],
+  );
+}
+
+/**
+ * Return all bettors for airdrop — includes both on-chain hex and p2tr wallet if available.
+ */
+export async function getAllBettors() {
+  const result = await pool.query(
+    `SELECT owner_hex, wallet, first_bet, last_bet, bet_count, created_at
+     FROM bettors
+     ORDER BY first_bet ASC`,
+  );
+  return result.rows;
 }
 
 /**

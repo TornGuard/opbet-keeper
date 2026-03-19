@@ -12,7 +12,7 @@ export const CONFIG = {
   rpcUrl: process.env.OPNET_RPC_URL || 'https://testnet.opnet.org',
 
   // Contract address (FeeBet_Market)
-  marketAddress: process.env.MARKET_ADDRESS || 'opt1sqqrm9dvf353e9klcq3y8mggcvsqm4f4adgzv786c',
+  marketAddress: process.env.MARKET_ADDRESS || 'opt1sqqucv3ewazm4y5yhy7uc5le706z76jtrpqkmpnqe',
 
   // Deployer wallet — one of these is REQUIRED
   deployerWif: process.env.DEPLOYER_WIF || '',
