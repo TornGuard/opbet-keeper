@@ -365,13 +365,13 @@ export function startHealthServer(oracle, resolver) {
       // ── POST /api/bets — frontend registers bet ownership ──
       if (req.method === 'POST' && url.pathname === '/api/bets') {
         const body = await readBody(req);
-        const { betId, wallet } = body;
+        const { betId, wallet, tokenSymbol } = body;
         if (!betId || !wallet) {
           res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'betId and wallet are required' }));
           return;
         }
-        await registerBetOwner({ betId: Number(betId), wallet });
+        await registerBetOwner({ betId: Number(betId), wallet, tokenSymbol });
         res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
         return;

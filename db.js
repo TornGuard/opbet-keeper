@@ -42,10 +42,9 @@ export async function initDb() {
     );
   `);
 
-  // Add wallet column if upgrading from an older schema
-  await pool.query(`
-    ALTER TABLE bets ADD COLUMN IF NOT EXISTS wallet TEXT;
-  `).catch(() => {});
+  // Add columns if upgrading from an older schema
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS wallet TEXT;`).catch(() => {});
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS token_symbol TEXT;`).catch(() => {});
 
   console.log('[DB] Tables ready');
 }
@@ -67,12 +66,14 @@ export async function upsertBet({ betId, betType, amount, endBlock }) {
  * Called by the frontend after placing a bet — this is the source of truth
  * for "which bets belong to which wallet" since the contract doesn't store bettor address.
  */
-export async function registerBetOwner({ betId, wallet }) {
+export async function registerBetOwner({ betId, wallet, tokenSymbol }) {
   await pool.query(
-    `INSERT INTO bets (bet_id, wallet)
-     VALUES ($1, $2)
-     ON CONFLICT (bet_id) DO UPDATE SET wallet = EXCLUDED.wallet`,
-    [betId, wallet.toLowerCase()],
+    `INSERT INTO bets (bet_id, wallet, token_symbol)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (bet_id) DO UPDATE
+       SET wallet = EXCLUDED.wallet,
+           token_symbol = COALESCE(EXCLUDED.token_symbol, bets.token_symbol)`,
+    [betId, wallet.toLowerCase(), tokenSymbol || null],
   );
 }
 
