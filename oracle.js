@@ -22,7 +22,6 @@ export class OracleFeeder {
     this.network = network;
     this.running = false;
     this.pollTimer = null;
-    this.btcTimer = null;
 
     // Latest Bitcoin data
     this.latestBtcFee = 0;
@@ -38,63 +37,55 @@ export class OracleFeeder {
 
   start() {
     this.running = true;
-    console.log('[Oracle] Starting OPNet block watcher...');
+    console.log('[Oracle] Starting signet block watcher...');
 
-    // Initial fetch
-    this.fetchBitcoinData().catch(() => {});
+    // Initial poll (includes fetchBitcoinData)
     this.poll().catch(() => {});
 
-    // Poll OPNet block + active bet state every 30s
+    // Poll signet tip + active bet state every 60s
+    // Signet blocks average ~10 min, so 60s is more than frequent enough
     this.pollTimer = setInterval(async () => {
       if (!this.running) return;
       await this.poll().catch((err) => {
         console.warn('[Oracle] Poll error:', err.message);
       });
-    }, 30_000);
-
-    // Refresh mempool fee data every 60s (fee only — block height comes from OPNet RPC)
-    this.btcTimer = setInterval(async () => {
-      if (!this.running) return;
-      await this.fetchBitcoinData().catch(() => {});
     }, 60_000);
   }
 
   stop() {
     this.running = false;
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
-    if (this.btcTimer) { clearInterval(this.btcTimer); this.btcTimer = null; }
   }
 
-  // ── Fetch latest fee + mempool data from mempool.space (fee data only) ──
-  // Block height tracking now uses OPNet RPC (see poll/refreshNeededBlocks)
+  // ── Fetch Bitcoin data ──
+  // Block height: signet (matches OPNet testnet, gives ~10 min bet windows)
+  // Fee + mempool: mainnet (real volatility so OVER/UNDER bets are meaningful)
   async fetchBitcoinData() {
-    const blocks = await this.fetchJSON('/v1/blocks');
+    // Signet tip height — block timing
+    const tip = await this.fetchJSON('/blocks/tip/height', CONFIG.mempoolRestEndpoints);
+    if (typeof tip === 'number' && tip > 0 && tip > this.latestBtcBlockHeight) {
+      this.latestBtcBlockHeight = tip;
+      console.log(`[Oracle] Signet tip: #${tip} — fee: ${this.latestBtcFee} sat/vB`);
+    }
+
+    // Mainnet fee + mempool — real market data for bet resolution
+    const blocks = await this.fetchJSON('/v1/blocks', CONFIG.mempoolMainnetEndpoints);
     if (blocks && blocks.length > 0) {
       const fee = blocks[0].extras?.medianFee ?? 0;
       if (fee > 0) this.latestBtcFee = fee;
     }
 
-    const mempool = await this.fetchJSON('/mempool');
+    const mempool = await this.fetchJSON('/mempool', CONFIG.mempoolMainnetEndpoints);
     if (mempool && mempool.count) {
       this.latestMempoolCount = mempool.count;
     }
   }
 
-  // ── Poll: refresh needed blocks from active bets + current OPNet block, then submit ──
+  // ── Poll: refresh needed blocks from active bets + current signet tip, then submit ──
   async poll() {
     if (!this.running) return;
 
-    // Get current OPNet block height to use as the oracle "BTC block" number
-    try {
-      const opnetBlock = await this.provider.getBlockNumber();
-      if (opnetBlock > this.latestBtcBlockHeight) {
-        this.latestBtcBlockHeight = opnetBlock;
-        console.log(`[Oracle] OPNet block: #${opnetBlock} — fee: ${this.latestBtcFee} sat/vB`);
-      }
-    } catch (err) {
-      console.warn('[Oracle] Failed to get OPNet block number:', err.message);
-    }
-
+    await this.fetchBitcoinData().catch(() => {});
     await this.refreshNeededBlocks();
 
     // Bet-required blocks: always submit if we have fee data
@@ -216,8 +207,8 @@ export class OracleFeeder {
     }
   }
 
-  async fetchJSON(path) {
-    for (const base of CONFIG.mempoolRestEndpoints) {
+  async fetchJSON(path, endpoints = CONFIG.mempoolRestEndpoints) {
+    for (const base of endpoints) {
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 8000);

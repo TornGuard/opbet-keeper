@@ -12,7 +12,7 @@ export const CONFIG = {
   rpcUrl: process.env.OPNET_RPC_URL || 'https://testnet.opnet.org',
 
   // Contract address (FeeBet_Market)
-  marketAddress: process.env.MARKET_ADDRESS || 'opt1sqqucv3ewazm4y5yhy7uc5le706z76jtrpqkmpnqe',
+  marketAddress: process.env.MARKET_ADDRESS || 'opt1sqqht90a38syqu7l7rcaf2ttveulsn9l57q3kyng7',
 
   // Deployer wallet — one of these is REQUIRED
   deployerWif: process.env.DEPLOYER_WIF || '',
@@ -21,11 +21,15 @@ export const CONFIG = {
   // Neon PostgreSQL connection string
   databaseUrl: process.env.DATABASE_URL || '',
 
-  // mempool.space REST endpoints (tried in order)
+  // Signet endpoints — for block height only (OPNet testnet timing)
   mempoolRestEndpoints: [
-    'https://mempool.ninja/api',
-    'https://mempool.bitcoin.nl/api',
+    'https://mempool.space/signet/api',
+  ],
+
+  // Mainnet endpoints — for fee + mempool data (real market volatility for bet resolution)
+  mempoolMainnetEndpoints: [
     'https://mempool.space/api',
+    'https://mempool.ninja/api',
   ],
 
   // How often to scan for resolvable bets (ms)
