@@ -60,6 +60,7 @@ export async function initDb() {
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS param1 TEXT;`).catch(() => {});
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS param2 TEXT;`).catch(() => {});
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS owner_hex TEXT;`).catch(() => {});
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS contract_address TEXT;`).catch(() => {});
 
   console.log('[DB] Tables ready');
 }
@@ -67,14 +68,15 @@ export async function initDb() {
 /**
  * Insert a newly discovered active bet (ignore if already known).
  */
-export async function upsertBet({ betId, betType, param1, param2, amount, endBlock }) {
+export async function upsertBet({ betId, betType, param1, param2, amount, endBlock, contractAddress }) {
   await pool.query(
-    `INSERT INTO bets (bet_id, bet_type, param1, param2, amount, end_block)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO bets (bet_id, bet_type, param1, param2, amount, end_block, contract_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (bet_id) DO UPDATE
-       SET param1 = COALESCE(EXCLUDED.param1, bets.param1),
-           param2 = COALESCE(EXCLUDED.param2, bets.param2)`,
-    [betId, Number(betType), param1 != null ? param1.toString() : null, param2 != null ? param2.toString() : null, amount.toString(), endBlock],
+       SET param1            = COALESCE(EXCLUDED.param1, bets.param1),
+           param2            = COALESCE(EXCLUDED.param2, bets.param2),
+           contract_address  = COALESCE(EXCLUDED.contract_address, bets.contract_address)`,
+    [betId, Number(betType), param1 != null ? param1.toString() : null, param2 != null ? param2.toString() : null, amount.toString(), endBlock, contractAddress || null],
   );
 }
 
@@ -97,13 +99,16 @@ export async function registerBetOwner({ betId, wallet, tokenSymbol }) {
 /**
  * Return bets owned by a wallet address (registered via registerBetOwner).
  */
-export async function getBetsByWallet(wallet) {
+export async function getBetsByWallet(wallet, contractAddress) {
+  const params = [wallet.toLowerCase()];
+  const contractFilter = contractAddress ? ` AND contract_address = $2` : '';
+  if (contractAddress) params.push(contractAddress);
   const result = await pool.query(
-    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, token_symbol, placed_at, resolved_at, resolve_tx
      FROM bets
-     WHERE wallet = $1
+     WHERE wallet = $1${contractFilter}
      ORDER BY bet_id DESC`,
-    [wallet.toLowerCase()],
+    params,
   );
   return result.rows;
 }
@@ -111,14 +116,17 @@ export async function getBetsByWallet(wallet) {
 /**
  * Return bets for a list of specific IDs (used by frontend to look up its localStorage IDs).
  */
-export async function getBetsByIds(ids) {
+export async function getBetsByIds(ids, contractAddress) {
   if (!ids || ids.length === 0) return [];
+  const params = [ids.map(Number)];
+  const contractFilter = contractAddress ? ` AND contract_address = $2` : '';
+  if (contractAddress) params.push(contractAddress);
   const result = await pool.query(
-    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, token_symbol, placed_at, resolved_at, resolve_tx
      FROM bets
-     WHERE bet_id = ANY($1)
+     WHERE bet_id = ANY($1)${contractFilter}
      ORDER BY bet_id DESC`,
-    [ids.map(Number)],
+    params,
   );
   return result.rows;
 }

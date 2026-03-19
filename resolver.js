@@ -110,7 +110,7 @@ export class BetResolver {
         const amount = info.properties.amount;
 
         // Persist the bet to the database (no-op if already stored; updates param1/param2 if missing)
-        await upsertBet({ betId: i, betType, param1, param2, amount, endBlock })
+        await upsertBet({ betId: i, betType, param1, param2, amount, endBlock, contractAddress: CONFIG.marketAddress })
           .catch((err) => console.warn('[DB] upsertBet failed:', err.message));
 
         // Index the bet owner for airdrop tracking

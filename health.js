@@ -385,13 +385,14 @@ export function startHealthServer(oracle, resolver) {
       if (req.method === 'GET' && url.pathname === '/api/bets') {
         const wallet = url.searchParams.get('wallet');
         const idsParam = url.searchParams.get('ids');
+        const contractAddress = url.searchParams.get('contract') || null;
 
         let bets;
         if (idsParam) {
           const ids = idsParam.split(',').map(Number).filter(n => !isNaN(n) && n > 0);
-          bets = await getBetsByIds(ids);
+          bets = await getBetsByIds(ids, contractAddress);
         } else if (wallet) {
-          bets = await getBetsByWallet(wallet);
+          bets = await getBetsByWallet(wallet, contractAddress);
         } else {
           res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'wallet or ids query param required' }));
