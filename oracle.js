@@ -38,25 +38,25 @@ export class OracleFeeder {
 
   start() {
     this.running = true;
-    console.log('[Oracle] Starting Bitcoin block watcher (keyed by BTC block height)...');
+    console.log('[Oracle] Starting OPNet block watcher...');
 
     // Initial fetch
     this.fetchBitcoinData().catch(() => {});
     this.poll().catch(() => {});
 
-    // Poll OPNet for active bet state every 10s
+    // Poll OPNet block + active bet state every 30s
     this.pollTimer = setInterval(async () => {
       if (!this.running) return;
       await this.poll().catch((err) => {
         console.warn('[Oracle] Poll error:', err.message);
       });
-    }, 10_000);
+    }, 30_000);
 
-    // Check for new Bitcoin blocks every 30s
+    // Refresh mempool fee data every 60s (fee only — block height comes from OPNet RPC)
     this.btcTimer = setInterval(async () => {
       if (!this.running) return;
       await this.fetchBitcoinData().catch(() => {});
-    }, 30_000);
+    }, 60_000);
   }
 
   stop() {
@@ -65,22 +65,13 @@ export class OracleFeeder {
     if (this.btcTimer) { clearInterval(this.btcTimer); this.btcTimer = null; }
   }
 
-  // ── Fetch latest Bitcoin block + mempool data ──
+  // ── Fetch latest fee + mempool data from mempool.space (fee data only) ──
+  // Block height tracking now uses OPNet RPC (see poll/refreshNeededBlocks)
   async fetchBitcoinData() {
     const blocks = await this.fetchJSON('/v1/blocks');
     if (blocks && blocks.length > 0) {
-      const latest = blocks[0];
-      const fee = latest.extras?.medianFee ?? 0;
-      const height = latest.height ?? 0;
-
+      const fee = blocks[0].extras?.medianFee ?? 0;
       if (fee > 0) this.latestBtcFee = fee;
-
-      if (height > this.latestBtcBlockHeight) {
-        this.latestBtcBlockHeight = height;
-        console.log(`[Oracle] New Bitcoin block: #${height} — fee: ${fee} sat/vB`);
-        // Queue this block for submission
-        this.neededBlocks.add(height);
-      }
     }
 
     const mempool = await this.fetchJSON('/mempool');
@@ -89,32 +80,37 @@ export class OracleFeeder {
     }
   }
 
-  // ── Poll: refresh needed blocks from active bets, then submit any pending ──
+  // ── Poll: refresh needed blocks from active bets + current OPNet block, then submit ──
   async poll() {
     if (!this.running) return;
 
+    // Get current OPNet block height to use as the oracle "BTC block" number
+    try {
+      const opnetBlock = await this.provider.getBlockNumber();
+      if (opnetBlock > this.latestBtcBlockHeight) {
+        this.latestBtcBlockHeight = opnetBlock;
+        console.log(`[Oracle] OPNet block: #${opnetBlock} — fee: ${this.latestBtcFee} sat/vB`);
+      }
+    } catch (err) {
+      console.warn('[Oracle] Failed to get OPNet block number:', err.message);
+    }
+
     await this.refreshNeededBlocks();
 
-    // Bet-required blocks: submit regardless of latestBtcBlockHeight — they are
-    // historical blocks that active bets need resolved. We only need fee data (any value).
+    // Bet-required blocks: always submit if we have fee data
     const betBlocks = [...this.neededBlocks]
       .filter((h) => !this.submittedBtcBlocks.has(h))
       .sort((a, b) => a - b);
 
-    // Current-chain block: only submit if we've seen it from mempool (it's a new block)
-    const chainBlocks = this.latestBtcBlockHeight > 0 && !this.submittedBtcBlocks.has(this.latestBtcBlockHeight)
+    // Current OPNet chain block: submit if new
+    const chainBlock = this.latestBtcBlockHeight > 0 && !this.submittedBtcBlocks.has(this.latestBtcBlockHeight)
       ? [this.latestBtcBlockHeight] : [];
 
-    const toSubmit = [...new Set([...betBlocks, ...chainBlocks])].sort((a, b) => a - b);
+    const toSubmit = [...new Set([...betBlocks, ...chainBlock])].sort((a, b) => a - b);
 
-    if (toSubmit.length === 0) {
-      if (this.neededBlocks.size > 0) {
-        console.log(`[Oracle] Needed blocks: ${[...this.neededBlocks].join(', ')} — waiting for fee data`);
-      }
-      return;
-    }
+    if (toSubmit.length === 0) return;
 
-    console.log(`[Oracle] Submitting BTC blocks: ${toSubmit.join(', ')}`);
+    console.log(`[Oracle] Submitting blocks: ${toSubmit.join(', ')}`);
     for (const h of toSubmit) {
       if (!this.running) break;
       await this.submitBlockData(h);
@@ -149,7 +145,7 @@ export class OracleFeeder {
       }
 
       if (this.neededBlocks.size > 0) {
-        console.log(`[Oracle] ${this.neededBlocks.size} BTC block(s) needed by active bets`);
+        console.log(`[Oracle] Active bets need blocks: ${[...this.neededBlocks].sort((a,b)=>a-b).join(', ')}`);
       }
     } catch (err) {
       console.warn('[Oracle] Failed to scan active bets:', err.message);
