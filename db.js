@@ -77,13 +77,27 @@ export async function registerBetOwner({ betId, wallet }) {
 }
 
 /**
- * Return all bet IDs owned by a wallet address.
+ * Return all bets owned by a wallet address.
+ * Also returns unassigned bets (wallet IS NULL) so the user can claim them.
  */
 export async function getBetsByWallet(wallet) {
   const result = await pool.query(
-    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, placed_at, resolved_at, resolve_tx
-     FROM bets WHERE wallet = $1 ORDER BY bet_id DESC`,
+    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+     FROM bets
+     WHERE wallet = $1 OR wallet IS NULL
+     ORDER BY bet_id DESC`,
     [wallet.toLowerCase()],
+  );
+  return result.rows;
+}
+
+/**
+ * Return all bets (admin/debug use).
+ */
+export async function getAllBets() {
+  const result = await pool.query(
+    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
+     FROM bets ORDER BY bet_id DESC`,
   );
   return result.rows;
 }
