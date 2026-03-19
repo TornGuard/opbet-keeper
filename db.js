@@ -85,14 +85,15 @@ export async function upsertBet({ betId, betType, param1, param2, amount, endBlo
  * Called by the frontend after placing a bet — this is the source of truth
  * for "which bets belong to which wallet" since the contract doesn't store bettor address.
  */
-export async function registerBetOwner({ betId, wallet, tokenSymbol }) {
+export async function registerBetOwner({ betId, wallet, tokenSymbol, contractAddress }) {
   await pool.query(
-    `INSERT INTO bets (bet_id, wallet, token_symbol)
-     VALUES ($1, $2, $3)
+    `INSERT INTO bets (bet_id, wallet, token_symbol, contract_address)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (bet_id) DO UPDATE
-       SET wallet = EXCLUDED.wallet,
-           token_symbol = COALESCE(EXCLUDED.token_symbol, bets.token_symbol)`,
-    [betId, wallet.toLowerCase(), tokenSymbol || null],
+       SET wallet           = EXCLUDED.wallet,
+           token_symbol     = COALESCE(EXCLUDED.token_symbol, bets.token_symbol),
+           contract_address = COALESCE(EXCLUDED.contract_address, bets.contract_address)`,
+    [betId, wallet.toLowerCase(), tokenSymbol || null, contractAddress || null],
   );
 }
 
