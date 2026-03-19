@@ -95,51 +95,57 @@ function sparkline(feeds) {
 }
 
 function renderHTML(stats) {
-  const betTypeLabel = (t) => (Number(t) === 0 ? '⬆ UP' : '⬇ DOWN');
-  const statusLabel = (s) => (Number(s) === 0
-    ? '<span class="badge active">Active</span>'
-    : '<span class="badge resolved">Resolved</span>');
-  const wonLabel = (won, status) => {
-    if (Number(status) === 0) return '—';
-    return won ? '<span class="badge win">WON</span>' : '<span class="badge loss">LOST</span>';
-  };
-  const shortTx = (tx) => tx
-    ? `<a href="https://testnet.opnet.org/tx/${tx}" target="_blank">${tx.slice(0, 10)}…</a>`
-    : '—';
-  const fmtDate = (d) => d ? new Date(d).toUTCString().replace(' GMT', '') : '—';
-  const fmtSats = (v) => v ? `${Number(v).toLocaleString()} sats` : '—';
   const fix2 = (v) => v != null ? Number(v).toFixed(2) : '—';
-
-  const shortWallet = (w) => w ? `<span title="${w}">${w.slice(0, 8)}…${w.slice(-6)}</span>` : '<span style="color:#333">unknown</span>';
-
-  const betsRows = stats.recentBets.map((b) => `
-    <tr>
-      <td>#${b.bet_id}</td>
-      <td>${betTypeLabel(b.bet_type)}</td>
-      <td>${fmtSats(b.amount)}</td>
-      <td>${b.end_block}</td>
-      <td>${statusLabel(b.status)}</td>
-      <td>${wonLabel(b.won, b.status)}</td>
-      <td>${fmtSats(b.payout)}</td>
-      <td>${shortWallet(b.wallet)}</td>
-      <td>${fmtDate(b.placed_at)}</td>
-      <td>${fmtDate(b.resolved_at)}</td>
-      <td>${shortTx(b.resolve_tx)}</td>
-    </tr>`).join('');
-
-  const feedRows = stats.recentFeeds.slice(0, 20).map((f) => `
-    <tr>
-      <td>${f.block_height}</td>
-      <td>${(f.median_fee_scaled / 100).toFixed(2)} sat/vB</td>
-      <td>${Number(f.mempool_count).toLocaleString()}</td>
-      <td>${shortTx(f.tx_id)}</td>
-      <td>${fmtDate(f.submitted_at)}</td>
-    </tr>`).join('');
+  const shortTx = (tx) => tx
+    ? `<a href="https://testnet.opnet.org/tx/${tx}" target="_blank" title="${tx}">${tx.slice(0, 8)}…${tx.slice(-6)}</a>`
+    : '—';
+  const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-GB', { hour12: false }) : '—';
+  const fmtDate = (d) => d ? new Date(d).toISOString().replace('T', ' ').slice(0, 16) : '—';
+  const shortWallet = (w) => w ? `<span title="${w}">${w.slice(0, 6)}…${w.slice(-4)}</span>` : '<span style="color:#333">?</span>';
 
   const fs = stats.feeStats;
+  const behind = stats.lastOPNetBlock - stats.lastSubmittedBlock;
+  const behindColor = behind > 5 ? 'orange' : 'green';
+
   const neededHtml = stats.neededBlocks.length
     ? stats.neededBlocks.sort((a, b) => a - b).map((b) => `<span class="pill">${b}</span>`).join(' ')
-    : '<span style="color:#444">none — no active bets</span>';
+    : '<span class="dim">none</span>';
+
+  // Unified TX log: merge oracle feeds + resolve TXs, sort by time desc
+  const txLog = [];
+  for (const f of stats.recentFeeds) {
+    if (f.tx_id) txLog.push({ time: f.submitted_at, type: 'oracle', label: `Block #${f.block_height}`, detail: `${(f.median_fee_scaled / 100).toFixed(1)} sat/vB`, tx: f.tx_id });
+  }
+  for (const b of stats.recentBets) {
+    if (b.resolve_tx) txLog.push({ time: b.resolved_at, type: b.won ? 'win' : 'loss', label: `Bet #${b.bet_id}`, detail: b.won ? 'WON' : 'LOST', tx: b.resolve_tx });
+  }
+  txLog.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  const txRows = txLog.slice(0, 20).map((t) => `
+    <tr>
+      <td class="dim">${fmtTime(t.time)}</td>
+      <td><span class="badge ${t.type}">${t.type === 'oracle' ? 'ORACLE' : t.type === 'win' ? 'RESOLVE WIN' : 'RESOLVE LOST'}</span></td>
+      <td>${t.label}</td>
+      <td class="${t.type === 'oracle' ? 'dim' : t.type === 'win' ? 'green' : 'red'}">${t.detail}</td>
+      <td>${shortTx(t.tx)}</td>
+    </tr>`).join('');
+
+  const betsRows = stats.recentBets.slice(0, 10).map((b) => {
+    const statusBadge = Number(b.status) === 0
+      ? '<span class="badge active">ACTIVE</span>'
+      : (b.won ? '<span class="badge win">WON</span>' : '<span class="badge loss">LOST</span>');
+    const amtMOTO = b.amount ? (Number(b.amount) / 1e18).toFixed(2) : '—';
+    const payMOTO = b.payout ? (Number(b.payout) / 1e18).toFixed(2) : '—';
+    return `<tr>
+      <td>#${b.bet_id}</td>
+      <td>${statusBadge}</td>
+      <td>${amtMOTO}</td>
+      <td>${payMOTO !== '—' ? `<span class="green">${payMOTO}</span>` : '—'}</td>
+      <td class="dim">#${b.end_block}</td>
+      <td>${shortWallet(b.wallet)}</td>
+      <td class="dim">${fmtDate(b.placed_at)}</td>
+    </tr>`;
+  }).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -149,192 +155,133 @@ function renderHTML(stats) {
   <meta http-equiv="refresh" content="10"/>
   <title>OP-BET Keeper</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0a0a0f; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; padding: 24px; }
-    h1 { font-size: 22px; font-weight: 700; color: #f7931a; margin-bottom: 4px; }
-    .subtitle { color: #555; font-size: 12px; margin-bottom: 28px; }
-    .subtitle span { color: #888; }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{background:#09090e;color:#d0d0d8;font-family:'Segoe UI',system-ui,sans-serif;font-size:12px;padding:14px 18px}
+    a{color:#60a5fa;text-decoration:none} a:hover{text-decoration:underline}
+    .dim{color:#444} .green{color:#22c55e} .orange{color:#f7931a} .red{color:#f87171} .blue{color:#60a5fa}
 
-    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 28px; }
-    .card { background: #13131f; border: 1px solid #1e1e2e; border-radius: 10px; padding: 16px; }
-    .card .label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
-    .card .value { font-size: 22px; font-weight: 700; color: #fff; }
-    .card .value.green  { color: #22c55e; }
-    .card .value.orange { color: #f7931a; }
-    .card .value.blue   { color: #60a5fa; }
-    .card .value.yellow { color: #facc15; }
-    .card .sub { font-size: 11px; color: #444; margin-top: 4px; }
+    /* Header */
+    .hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .hdr h1{font-size:16px;font-weight:700;color:#f7931a;display:flex;align-items:center;gap:8px}
+    .hdr .ts{font-size:11px;color:#444}
+    .dot{width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
-    h2 { font-size: 14px; font-weight: 600; color: #888; margin-bottom: 12px; border-left: 3px solid #f7931a; padding-left: 8px; text-transform: uppercase; letter-spacing: 0.06em; }
-    .section { margin-bottom: 32px; }
+    /* Stat strip */
+    .stats{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:12px}
+    @media(max-width:900px){.stats{grid-template-columns:repeat(4,1fr)}}
+    .stat{background:#11111c;border:1px solid #1c1c2e;border-radius:7px;padding:9px 10px}
+    .stat .lbl{font-size:10px;color:#444;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+    .stat .val{font-size:18px;font-weight:700;color:#fff;line-height:1}
+    .stat .val.g{color:#22c55e}.stat .val.o{color:#f7931a}.stat .val.b{color:#60a5fa}
+    .stat .sub{font-size:10px;color:#333;margin-top:2px}
 
-    /* Oracle panel */
-    .oracle-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
-    @media(max-width:700px){ .oracle-grid { grid-template-columns: 1fr; } }
-    .oracle-panel { background: #13131f; border: 1px solid #1e1e2e; border-radius: 10px; padding: 18px; }
-    .oracle-panel h3 { font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; }
-    .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #1a1a2a; }
-    .stat-row:last-child { border-bottom: none; }
-    .stat-row .k { color: #666; font-size: 12px; }
-    .stat-row .v { font-weight: 600; color: #e0e0e0; }
-    .stat-row .v.orange { color: #f7931a; }
-    .stat-row .v.green  { color: #22c55e; }
-    .stat-row .v.blue   { color: #60a5fa; }
+    /* Main grid */
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+    @media(max-width:750px){.grid{grid-template-columns:1fr}}
+    .panel{background:#11111c;border:1px solid #1c1c2e;border-radius:8px;overflow:hidden}
+    .panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #1c1c2e;font-size:10px;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.06em}
+    .panel-body{padding:10px 12px}
 
-    .pill { display: inline-block; background: #1a2035; color: #60a5fa; border: 1px solid #1e3a5f; border-radius: 4px; padding: 2px 7px; font-size: 11px; margin: 2px; }
-    .needed-wrap { background: #13131f; border: 1px solid #1e1e2e; border-radius: 10px; padding: 16px; margin-bottom: 28px; }
-    .needed-wrap h3 { font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+    /* Oracle rows */
+    .orow{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #141420;font-size:11px}
+    .orow:last-child{border-bottom:none}
+    .orow .k{color:#555}
+    .orow .v{font-weight:600}
 
-    .sparkline-wrap { background: #13131f; border: 1px solid #1e1e2e; border-radius: 10px; padding: 18px; margin-bottom: 28px; }
-    .sparkline-wrap h3 { font-size: 12px; color: #555; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
-    .sparkline-wrap svg { display: block; }
-    .spark-labels { display: flex; justify-content: space-between; font-size: 10px; color: #444; margin-top: 4px; }
+    /* Sparkline */
+    .spark{background:#11111c;border:1px solid #1c1c2e;border-radius:8px;padding:10px 12px;margin-bottom:12px}
+    .spark h3{font-size:10px;color:#444;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+    .spark-labels{display:flex;justify-content:space-between;font-size:9px;color:#333;margin-top:3px}
 
-    .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e1e2e; }
-    table { width: 100%; border-collapse: collapse; }
-    thead th { background: #13131f; color: #555; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 12px; text-align: left; white-space: nowrap; }
-    tbody tr { border-top: 1px solid #1a1a2a; }
-    tbody tr:hover { background: #13131f; }
-    tbody td { padding: 9px 12px; color: #ccc; white-space: nowrap; }
-    tbody td a { color: #60a5fa; text-decoration: none; }
-    tbody td a:hover { text-decoration: underline; }
+    /* Pills */
+    .pill{display:inline-block;background:#0e1829;color:#60a5fa;border:1px solid #1e3a5f;border-radius:3px;padding:1px 5px;font-size:10px;margin:1px}
 
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
-    .badge.active   { background: #1e3a5f; color: #60a5fa; }
-    .badge.resolved { background: #1a2e1a; color: #4ade80; }
-    .badge.win      { background: #14532d; color: #4ade80; }
-    .badge.loss     { background: #3b0a0a; color: #f87171; }
+    /* Tables */
+    .tbl-wrap{overflow-x:auto}
+    table{width:100%;border-collapse:collapse}
+    thead th{color:#444;font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:6px 8px;text-align:left;white-space:nowrap;border-bottom:1px solid #1c1c2e}
+    tbody tr{border-top:1px solid #131320}
+    tbody tr:hover{background:#0f0f1e}
+    tbody td{padding:5px 8px;white-space:nowrap;font-size:11px}
 
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 6px; animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .refresh-note { font-size: 11px; color: #333; margin-top: 20px; }
-    .refresh-note a { color: #333; }
+    /* Badges */
+    .badge{display:inline-block;padding:1px 6px;border-radius:99px;font-size:10px;font-weight:700;letter-spacing:.03em}
+    .badge.active{background:#0e2040;color:#60a5fa}
+    .badge.win   {background:#0a2e14;color:#4ade80}
+    .badge.loss  {background:#2e0a0a;color:#f87171}
+    .badge.oracle{background:#1a1a0a;color:#facc15}
+    .badge.resolve{background:#0a2e14;color:#4ade80}
+
+    .footer{font-size:10px;color:#333;margin-top:10px}
+    .footer a{color:#222}
   </style>
 </head>
 <body>
 
-<h1><span class="dot"></span>OP-BET Keeper</h1>
-<p class="subtitle">Auto-refreshes every 10s &nbsp;·&nbsp; <span>${new Date().toUTCString()}</span></p>
-
-<!-- Top stat cards -->
-<div class="cards">
-  <div class="card">
-    <div class="label">Uptime</div>
-    <div class="value blue">${formatUptime(stats.uptime)}</div>
-  </div>
-  <div class="card">
-    <div class="label">OPNet Block</div>
-    <div class="value orange">${stats.lastOPNetBlock.toLocaleString()}</div>
-  </div>
-  <div class="card">
-    <div class="label">Last Feed Block</div>
-    <div class="value">${stats.lastSubmittedBlock.toLocaleString()}</div>
-  </div>
-  <div class="card">
-    <div class="label">BTC Fee (live)</div>
-    <div class="value green">${stats.latestBtcFee} <span style="font-size:12px;color:#555">sat/vB</span></div>
-    <div class="sub">mempool: ${stats.latestMempoolCount.toLocaleString()} txs</div>
-  </div>
-  <div class="card">
-    <div class="label">Total Bets</div>
-    <div class="value orange">${stats.betsTotal}</div>
-    <div class="sub">${stats.betsActive} active</div>
-  </div>
-  <div class="card">
-    <div class="label">Oracle Feeds</div>
-    <div class="value blue">${stats.oracleFeedsTotal}</div>
-    <div class="sub">blocks submitted</div>
-  </div>
-  <div class="card">
-    <div class="label">Resolved</div>
-    <div class="value green">${stats.resolvedInMemory}</div>
-    <div class="sub">this session</div>
-  </div>
+<div class="hdr">
+  <h1><span class="dot"></span>OP-BET Keeper</h1>
+  <span class="ts">auto-refresh 10s &nbsp;·&nbsp; ${new Date().toUTCString()}</span>
 </div>
 
-<!-- Oracle detail panels -->
-<div class="section">
-  <h2>Oracle Detail</h2>
-  <div class="oracle-grid">
+<!-- Stat strip -->
+<div class="stats">
+  <div class="stat"><div class="lbl">Uptime</div><div class="val b" style="font-size:14px">${formatUptime(stats.uptime)}</div></div>
+  <div class="stat"><div class="lbl">OPNet Block</div><div class="val o">${stats.lastOPNetBlock.toLocaleString()}</div></div>
+  <div class="stat"><div class="lbl">Last Feed</div><div class="val">${stats.lastSubmittedBlock.toLocaleString()}</div><div class="sub ${behindColor}">${behind} behind</div></div>
+  <div class="stat"><div class="lbl">BTC Fee</div><div class="val g">${stats.latestBtcFee}</div><div class="sub">sat/vB</div></div>
+  <div class="stat"><div class="lbl">Mempool</div><div class="val" style="font-size:14px">${stats.latestMempoolCount.toLocaleString()}</div><div class="sub">txs</div></div>
+  <div class="stat"><div class="lbl">Bets</div><div class="val o">${stats.betsTotal}</div><div class="sub">${stats.betsActive} active</div></div>
+  <div class="stat"><div class="lbl">Feeds</div><div class="val b">${stats.oracleFeedsTotal}</div></div>
+  <div class="stat"><div class="lbl">Resolved</div><div class="val g">${stats.resolvedInMemory}</div><div class="sub">this session</div></div>
+</div>
 
-    <div class="oracle-panel">
-      <h3>Live State</h3>
-      <div class="stat-row"><span class="k">OPNet block height</span><span class="v orange">${stats.lastOPNetBlock.toLocaleString()}</span></div>
-      <div class="stat-row"><span class="k">Last block submitted</span><span class="v">${stats.lastSubmittedBlock.toLocaleString()}</span></div>
-      <div class="stat-row"><span class="k">Blocks behind</span><span class="v ${stats.lastOPNetBlock - stats.lastSubmittedBlock > 5 ? 'orange' : 'green'}">${stats.lastOPNetBlock - stats.lastSubmittedBlock}</span></div>
-      <div class="stat-row"><span class="k">Current BTC fee</span><span class="v green">${stats.latestBtcFee} sat/vB</span></div>
-      <div class="stat-row"><span class="k">Mempool tx count</span><span class="v">${stats.latestMempoolCount.toLocaleString()}</span></div>
-      <div class="stat-row"><span class="k">Blocks needed (active bets)</span><span class="v blue">${stats.neededBlocks.length}</span></div>
+<!-- Middle grid: oracle state + bets -->
+<div class="grid">
+  <!-- Oracle live state -->
+  <div class="panel">
+    <div class="panel-hdr">
+      <span>Oracle State</span>
+      <span class="dim">fee stats: avg ${fix2(fs.avg_fee)} · min ${fix2(fs.min_fee)} · max ${fix2(fs.max_fee)} sat/vB</span>
     </div>
-
-    <div class="oracle-panel">
-      <h3>All-time Fee Stats</h3>
-      <div class="stat-row"><span class="k">Min fee submitted</span><span class="v">${fix2(fs.min_fee)} sat/vB</span></div>
-      <div class="stat-row"><span class="k">Max fee submitted</span><span class="v orange">${fix2(fs.max_fee)} sat/vB</span></div>
-      <div class="stat-row"><span class="k">Avg fee submitted</span><span class="v">${fix2(fs.avg_fee)} sat/vB</span></div>
-      <div class="stat-row"><span class="k">Min mempool count</span><span class="v">${fs.min_mempool != null ? Number(fs.min_mempool).toLocaleString() : '—'}</span></div>
-      <div class="stat-row"><span class="k">Max mempool count</span><span class="v">${fs.max_mempool != null ? Number(fs.max_mempool).toLocaleString() : '—'}</span></div>
-      <div class="stat-row"><span class="k">Avg mempool count</span><span class="v">${fs.avg_mempool != null ? Number(fs.avg_mempool).toLocaleString() : '—'}</span></div>
+    <div class="panel-body">
+      <div class="orow"><span class="k">Blocks needed</span><span class="v">${neededHtml}</span></div>
+      <div class="orow"><span class="k">Blocks behind</span><span class="v ${behindColor}">${behind}</span></div>
+      <div class="orow"><span class="k">Avg mempool</span><span class="v">${fs.avg_mempool != null ? Number(fs.avg_mempool).toLocaleString() : '—'} txs</span></div>
     </div>
-
   </div>
 
-  <!-- Blocks needed by active bets -->
-  <div class="needed-wrap">
-    <h3>Blocks Needed by Active Bets</h3>
-    ${neededHtml}
-  </div>
-
-  <!-- Fee sparkline -->
-  <div class="sparkline-wrap">
-    <h3>BTC Median Fee — Last ${stats.recentFeeds.length} Submissions</h3>
-    ${sparkline(stats.recentFeeds)}
-    <div class="spark-labels">
-      <span>oldest</span>
-      <span>sat/vB</span>
-      <span>latest</span>
+  <!-- Active bets -->
+  <div class="panel">
+    <div class="panel-hdr"><span>Recent Bets</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Status</th><th>Amount</th><th>Payout</th><th>End</th><th>Wallet</th><th>Placed</th></tr></thead>
+        <tbody>${betsRows || '<tr><td colspan="7" style="text-align:center;color:#333;padding:12px">No bets</td></tr>'}</tbody>
+      </table>
     </div>
   </div>
 </div>
 
-<!-- Oracle feeds table -->
-<div class="section">
-  <h2>Recent Oracle Feeds (last 20)</h2>
-  <div class="table-wrap">
+<!-- Fee sparkline -->
+<div class="spark">
+  <h3>BTC Median Fee — last ${stats.recentFeeds.length} submissions</h3>
+  ${sparkline(stats.recentFeeds)}
+  <div class="spark-labels"><span>oldest</span><span>sat/vB</span><span>latest</span></div>
+</div>
+
+<!-- Unified TX log -->
+<div class="panel">
+  <div class="panel-hdr"><span>Transaction Log</span><span class="dim">oracle feeds + resolves · last 20</span></div>
+  <div class="tbl-wrap">
     <table>
-      <thead>
-        <tr>
-          <th>Block Height</th>
-          <th>Median Fee</th>
-          <th>Mempool Txs</th>
-          <th>TX</th>
-          <th>Submitted At</th>
-        </tr>
-      </thead>
-      <tbody>${feedRows || '<tr><td colspan="5" style="text-align:center;color:#333;padding:20px">No feeds yet</td></tr>'}</tbody>
+      <thead><tr><th>Time</th><th>Type</th><th>Target</th><th>Detail</th><th>TX</th></tr></thead>
+      <tbody>${txRows || '<tr><td colspan="5" style="text-align:center;color:#333;padding:12px">No transactions yet</td></tr>'}</tbody>
     </table>
   </div>
 </div>
 
-<!-- Bets table -->
-<div class="section">
-  <h2>Recent Bets (last 20)</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th><th>Type</th><th>Amount</th><th>End Block</th>
-          <th>Status</th><th>Result</th><th>Payout</th><th>Wallet</th>
-          <th>Placed At</th><th>Resolved At</th><th>TX</th>
-        </tr>
-      </thead>
-      <tbody>${betsRows || '<tr><td colspan="11" style="text-align:center;color:#333;padding:20px">No bets yet</td></tr>'}</tbody>
-    </table>
-  </div>
-</div>
-
-<p class="refresh-note">JSON API: <a href="/health">/health</a></p>
-
+<p class="footer">JSON: <a href="/health">/health</a> &nbsp;·&nbsp; Bets: <a href="/api/bets?wallet=">/api/bets</a></p>
 </body>
 </html>`;
 }
