@@ -6,7 +6,13 @@
  */
 
 import http from 'http';
-import { pool } from './db.js';
+import { pool, registerBetOwner, getBetsByWallet } from './db.js';
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
 
 function formatUptime(seconds) {
   const d = Math.floor(seconds / 86400);
@@ -30,7 +36,7 @@ async function getStats(oracle, resolver) {
     pool.query('SELECT COUNT(*) FROM bets'),
     pool.query('SELECT COUNT(*) FROM oracle_feeds'),
     pool.query(`
-      SELECT bet_id, bet_type, amount, end_block, status, won, payout, placed_at, resolved_at, resolve_tx
+      SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
       FROM bets ORDER BY bet_id DESC LIMIT 20
     `),
     pool.query(`
@@ -101,6 +107,8 @@ function renderHTML(stats) {
   const fmtSats = (v) => v ? `${Number(v).toLocaleString()} sats` : '—';
   const fix2 = (v) => v != null ? Number(v).toFixed(2) : '—';
 
+  const shortWallet = (w) => w ? `<span title="${w}">${w.slice(0, 8)}…${w.slice(-6)}</span>` : '<span style="color:#333">unknown</span>';
+
   const betsRows = stats.recentBets.map((b) => `
     <tr>
       <td>#${b.bet_id}</td>
@@ -110,6 +118,7 @@ function renderHTML(stats) {
       <td>${statusLabel(b.status)}</td>
       <td>${wonLabel(b.won, b.status)}</td>
       <td>${fmtSats(b.payout)}</td>
+      <td>${shortWallet(b.wallet)}</td>
       <td>${fmtDate(b.placed_at)}</td>
       <td>${fmtDate(b.resolved_at)}</td>
       <td>${shortTx(b.resolve_tx)}</td>
@@ -312,11 +321,11 @@ function renderHTML(stats) {
       <thead>
         <tr>
           <th>ID</th><th>Type</th><th>Amount</th><th>End Block</th>
-          <th>Status</th><th>Result</th><th>Payout</th>
+          <th>Status</th><th>Result</th><th>Payout</th><th>Wallet</th>
           <th>Placed At</th><th>Resolved At</th><th>TX</th>
         </tr>
       </thead>
-      <tbody>${betsRows || '<tr><td colspan="10" style="text-align:center;color:#333;padding:20px">No bets yet</td></tr>'}</tbody>
+      <tbody>${betsRows || '<tr><td colspan="11" style="text-align:center;color:#333;padding:20px">No bets yet</td></tr>'}</tbody>
     </table>
   </div>
 </div>
@@ -327,32 +336,90 @@ function renderHTML(stats) {
 </html>`;
 }
 
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => {
+      try { resolve(JSON.parse(data || '{}')); }
+      catch { reject(new Error('Invalid JSON')); }
+    });
+    req.on('error', reject);
+  });
+}
+
 export function startHealthServer(oracle, resolver) {
   const port = Number(process.env.PORT) || 3000;
 
   const server = http.createServer(async (req, res) => {
-    try {
-      const stats = await getStats(oracle, resolver);
+    const url = new URL(req.url, `http://localhost`);
 
-      if (req.url === '/health') {
+    // CORS preflight
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS_HEADERS);
+      res.end();
+      return;
+    }
+
+    try {
+      // ── POST /api/bets — frontend registers bet ownership ──
+      if (req.method === 'POST' && url.pathname === '/api/bets') {
+        const body = await readBody(req);
+        const { betId, wallet } = body;
+        if (!betId || !wallet) {
+          res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'betId and wallet are required' }));
+          return;
+        }
+        await registerBetOwner({ betId: Number(betId), wallet });
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // ── GET /api/bets?wallet=xxx — fetch bet IDs for a wallet ──
+      if (req.method === 'GET' && url.pathname === '/api/bets') {
+        const wallet = url.searchParams.get('wallet');
+        if (!wallet) {
+          res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'wallet query param is required' }));
+          return;
+        }
+        const bets = await getBetsByWallet(wallet);
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(bets));
+        return;
+      }
+
+      // ── GET /health — JSON summary for monitoring ──
+      if (req.method === 'GET' && url.pathname === '/health') {
+        const stats = await getStats(oracle, resolver);
         const { recentBets, recentFeeds, ...summary } = stats;
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
         res.end(JSON.stringify(summary, null, 2));
-      } else if (req.url === '/' || req.url === '/dashboard') {
+        return;
+      }
+
+      // ── GET / — HTML dashboard ──
+      if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/dashboard')) {
+        const stats = await getStats(oracle, resolver);
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(renderHTML(stats));
-      } else {
-        res.writeHead(302, { Location: '/' });
-        res.end();
+        return;
       }
+
+      res.writeHead(302, { Location: '/' });
+      res.end();
+
     } catch (err) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.writeHead(500, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'error', error: err.message }));
     }
   });
 
   server.listen(port, () => {
-    console.log(`[Health] Dashboard: http://0.0.0.0:${port}/`);
-    console.log(`[Health] JSON API:  http://0.0.0.0:${port}/health`);
+    console.log(`[Health] Dashboard:  http://0.0.0.0:${port}/`);
+    console.log(`[Health] JSON API:   http://0.0.0.0:${port}/health`);
+    console.log(`[Health] Bets API:   http://0.0.0.0:${port}/api/bets?wallet=<address>`);
   });
 }

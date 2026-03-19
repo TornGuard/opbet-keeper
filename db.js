@@ -2,7 +2,7 @@
  * Neon PostgreSQL database layer for OP-BET Keeper.
  *
  * Tables:
- *   bets         — every bet seen on-chain (active → resolved)
+ *   bets         — every bet seen on-chain (active → resolved), with optional wallet owner
  *   oracle_feeds — every setBlockData submission
  */
 
@@ -25,6 +25,7 @@ export async function initDb() {
       status        SMALLINT    NOT NULL DEFAULT 0,
       won           BOOLEAN,
       payout        TEXT,
+      wallet        TEXT,
       placed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       resolved_at   TIMESTAMPTZ,
       resolve_tx    TEXT
@@ -40,6 +41,12 @@ export async function initDb() {
       UNIQUE (block_height)
     );
   `);
+
+  // Add wallet column if upgrading from an older schema
+  await pool.query(`
+    ALTER TABLE bets ADD COLUMN IF NOT EXISTS wallet TEXT;
+  `).catch(() => {});
+
   console.log('[DB] Tables ready');
 }
 
@@ -53,6 +60,32 @@ export async function upsertBet({ betId, betType, amount, endBlock }) {
      ON CONFLICT (bet_id) DO NOTHING`,
     [betId, Number(betType), amount.toString(), endBlock],
   );
+}
+
+/**
+ * Set the wallet address that owns a bet.
+ * Called by the frontend after placing a bet — this is the source of truth
+ * for "which bets belong to which wallet" since the contract doesn't store bettor address.
+ */
+export async function registerBetOwner({ betId, wallet }) {
+  await pool.query(
+    `INSERT INTO bets (bet_id, wallet)
+     VALUES ($1, $2)
+     ON CONFLICT (bet_id) DO UPDATE SET wallet = EXCLUDED.wallet`,
+    [betId, wallet.toLowerCase()],
+  );
+}
+
+/**
+ * Return all bet IDs owned by a wallet address.
+ */
+export async function getBetsByWallet(wallet) {
+  const result = await pool.query(
+    `SELECT bet_id, bet_type, amount, end_block, status, won, payout, placed_at, resolved_at, resolve_tx
+     FROM bets WHERE wallet = $1 ORDER BY bet_id DESC`,
+    [wallet.toLowerCase()],
+  );
+  return result.rows;
 }
 
 /**
