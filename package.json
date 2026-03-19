@@ -1,0 +1,19 @@
+{
+  "name": "opbet-keeper",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "OP-BET Keeper Bot: Oracle feed + auto-resolve bets, persisted to Neon PostgreSQL",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "pm2": "pm2 start ecosystem.config.cjs"
+  },
+  "dependencies": {
+    "@btc-vision/bitcoin": "latest",
+    "@btc-vision/transaction": "latest",
+    "dotenv": "^17.3.1",
+    "opnet": "latest",
+    "pg": "^8.20.0"
+  }
+}
