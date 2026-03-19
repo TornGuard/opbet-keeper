@@ -29,15 +29,15 @@ async function getStats(oracle, resolver) {
     betsResult,
     feedsResult,
     bettorsResult,
+    activeBetsResult,
     recentBets,
     recentFeeds,
     feeStats,
-    activeBets,
   ] = await Promise.all([
     pool.query('SELECT COUNT(*) FROM bets'),
     pool.query('SELECT COUNT(*) FROM oracle_feeds'),
     pool.query('SELECT COUNT(*) FROM bettors'),
-    pool.query('SELECT COUNT(*) FROM bettors'),
+    pool.query('SELECT COUNT(*) FROM bets WHERE status = 0'),
     pool.query(`
       SELECT bet_id, bet_type, amount, end_block, status, won, payout, wallet, placed_at, resolved_at, resolve_tx
       FROM bets ORDER BY bet_id DESC LIMIT 20
@@ -56,18 +56,17 @@ async function getStats(oracle, resolver) {
         AVG(mempool_count)::int              AS avg_mempool
       FROM oracle_feeds
     `),
-    pool.query(`SELECT COUNT(*) FROM bets WHERE status = 0`),
   ]);
 
   return {
     uptime: Math.floor(process.uptime()),
-    lastOPNetBlock: oracle.lastKnownOPNetBlock,
-    lastSubmittedBlock: oracle.lastSubmittedHeight,
+    lastOPNetBlock: oracle.latestBtcBlockHeight,
+    lastSubmittedBlock: oracle.latestBtcBlockHeight,
     latestBtcFee: oracle.latestBtcFee,
     latestMempoolCount: oracle.latestMempoolCount,
     neededBlocks: [...oracle.neededBlocks],
     betsTotal: Number(betsResult.rows[0].count),
-    betsActive: Number(activeBets.rows[0].count),
+    betsActive: Number(activeBetsResult.rows[0].count),
     bettorsTotal: Number(bettorsResult.rows[0].count),
     oracleFeedsTotal: Number(feedsResult.rows[0].count),
     resolvedInMemory: resolver.resolvedIds.size,
