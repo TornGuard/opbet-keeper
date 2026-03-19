@@ -95,22 +95,29 @@ export class OracleFeeder {
 
     await this.refreshNeededBlocks();
 
-    if (this.neededBlocks.size === 0) {
-      console.log('[Oracle] No Bitcoin blocks needed — skipping submission');
+    // Bet-required blocks: submit regardless of latestBtcBlockHeight — they are
+    // historical blocks that active bets need resolved. We only need fee data (any value).
+    const betBlocks = [...this.neededBlocks]
+      .filter((h) => !this.submittedBtcBlocks.has(h))
+      .sort((a, b) => a - b);
+
+    // Current-chain block: only submit if we've seen it from mempool (it's a new block)
+    const chainBlocks = this.latestBtcBlockHeight > 0 && !this.submittedBtcBlocks.has(this.latestBtcBlockHeight)
+      ? [this.latestBtcBlockHeight] : [];
+
+    const toSubmit = [...new Set([...betBlocks, ...chainBlocks])].sort((a, b) => a - b);
+
+    if (toSubmit.length === 0) {
+      if (this.neededBlocks.size > 0) {
+        console.log(`[Oracle] Needed blocks: ${[...this.neededBlocks].join(', ')} — waiting for fee data`);
+      }
       return;
     }
 
-    // Submit needed BTC blocks we have fee data for and haven't submitted yet
-    const toSubmit = [...this.neededBlocks]
-      .filter((h) => h <= this.latestBtcBlockHeight && !this.submittedBtcBlocks.has(h))
-      .sort((a, b) => a - b);
-
-    if (toSubmit.length > 0) {
-      console.log(`[Oracle] Submitting BTC blocks: ${toSubmit.join(', ')}`);
-      for (const h of toSubmit) {
-        if (!this.running) break;
-        await this.submitBlockData(h);
-      }
+    console.log(`[Oracle] Submitting BTC blocks: ${toSubmit.join(', ')}`);
+    for (const h of toSubmit) {
+      if (!this.running) break;
+      await this.submitBlockData(h);
     }
   }
 
@@ -169,11 +176,12 @@ export class OracleFeeder {
       // Check if already on-chain
       const existing = await this.contract.getBlockData(BigInt(btcHeight));
       if (existing.properties && existing.properties.dataSet > 0n) {
+        console.log(`[Oracle] BTC block #${btcHeight} already on-chain — skipping`);
         this.submittedBtcBlocks.add(btcHeight);
         return;
       }
 
-      console.log(`[Oracle] BTC block #${btcHeight} — fee: ${medianFee} sat/vB (${medianFeeScaled}), mempool: ${mempoolCount}`);
+      console.log(`[Oracle] Submitting BTC block #${btcHeight} — fee: ${medianFee} sat/vB (${medianFeeScaled}), mempool: ${mempoolCount}`);
 
       const simulation = await this.contract.setBlockData(
         BigInt(btcHeight),
@@ -183,7 +191,7 @@ export class OracleFeeder {
       );
 
       if (simulation.revert) {
-        console.error(`[Oracle] BTC block #${btcHeight} reverted: ${simulation.revert}`);
+        console.error(`[Oracle] BTC block #${btcHeight} simulation REVERTED: "${simulation.revert}"`);
         return;
       }
 
