@@ -19,6 +19,7 @@ import { MARKET_ABI } from './abi.js';
 import { OracleFeeder } from './oracle.js';
 import { BetResolver } from './resolver.js';
 import { initDb } from './db.js';
+import { startHealthServer } from './health.js';
 
 async function main() {
   if (!CONFIG.mnemonic && !CONFIG.deployerWif) {
@@ -111,6 +112,9 @@ async function main() {
   const resolver = new BetResolver(contract, wallet, provider, network);
   resolver.oracle = oracle;
   resolver.start();
+
+  // Start health HTTP server
+  startHealthServer(oracle, resolver);
 
   // Graceful shutdown
   const shutdown = () => {
