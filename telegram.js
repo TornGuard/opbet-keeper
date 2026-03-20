@@ -119,10 +119,11 @@ export async function notifyStartup() {
 /**
  * New bet placed.
  */
-export async function notifyEntry({ betId, wallet, txId, direction, threshold, amount, endBlock }) {
+export async function notifyEntry({ betId, wallet, txId, direction, threshold, amount, endBlock, tokenSymbol }) {
   console.log(`[Telegram] notifyEntry #${betId} wallet=${wallet || 'anon'} dir=${direction} threshold=${threshold}`);
   const who      = shortWallet(wallet);
   const dirEmoji = direction === 'over' ? '📈' : direction === 'under' ? '📉' : '🎯';
+  const symbol   = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
   const amtNum   = amount ? (Number(amount) / 1e18).toFixed(2) : null;
   const txUrl    = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
 
@@ -138,7 +139,7 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
   }
 
   if (amtNum) {
-    msg.emoji('💰', EMOJI.money).plain(' ').bold(`${amtNum} MOTO`).nl();
+    msg.emoji('💰', EMOJI.money).plain(' ').bold(`${amtNum} ${symbol}`).nl();
   }
 
   if (endBlock) {
@@ -188,7 +189,7 @@ export async function notifyWin({ betId, wallet, payout, direction, threshold })
   msg.plain('💵 Payout: ').bold(payoutStr).nl(2);
 
   if (explorerUrl) {
-    msg.plain('🔍 ').link('View Wallet', explorerUrl).plain('  ·  ');
+    msg.emoji('🔥', EMOJI.fire).plain(' ').link('View Wallet', explorerUrl).plain('  ·  ');
   }
   msg.plain('🎰 ').link('Place Your Bet', APP_URL);
 
