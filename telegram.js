@@ -9,7 +9,8 @@ const APP_URL = 'https://op-bet.vercel.app/';
 
 // Custom emoji IDs (Telegram Premium)
 const EMOJI = {
-  money: '5280862672131204613', // 💰
+  money:  '5280862672131204613', // 💰
+  fire:   '6048796704327606386', // 🔥
 };
 
 if (TOKEN && CHAT_ID) {
@@ -118,12 +119,12 @@ export async function notifyStartup() {
 /**
  * New bet placed.
  */
-export async function notifyEntry({ betId, wallet, direction, threshold, amount, endBlock }) {
+export async function notifyEntry({ betId, wallet, txId, direction, threshold, amount, endBlock }) {
   console.log(`[Telegram] notifyEntry #${betId} wallet=${wallet || 'anon'} dir=${direction} threshold=${threshold}`);
   const who      = shortWallet(wallet);
   const dirEmoji = direction === 'over' ? '📈' : direction === 'under' ? '📉' : '🎯';
   const amtNum   = amount ? (Number(amount) / 1e18).toFixed(2) : null;
-  const explorerUrl = wallet ? `https://testnet.opnet.org/address/${wallet}` : null;
+  const txUrl    = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
 
   const msg = new Msg()
     .plain('🟢 ').bold('New Bet Placed!')
@@ -146,8 +147,8 @@ export async function notifyEntry({ betId, wallet, direction, threshold, amount,
 
   msg.nl();
 
-  if (explorerUrl) {
-    msg.plain('🔍 ').link('View Wallet', explorerUrl).plain('  ·  ');
+  if (txUrl) {
+    msg.emoji('🔥', EMOJI.fire).plain(' ').link('View Tx', txUrl).plain('  ·  ');
   }
   msg.plain('🎰 ').link('Place Your Bet', APP_URL);
 

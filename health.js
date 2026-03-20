@@ -316,7 +316,7 @@ export function startHealthServer(oracle, resolver) {
       // ── POST /api/bets — frontend registers bet ownership ──
       if (req.method === 'POST' && url.pathname === '/api/bets') {
         const body = await readBody(req);
-        const { betId, wallet, tokenSymbol, contractAddress, betType, param1, param2, amount, endBlock } = body;
+        const { betId, wallet, txId, tokenSymbol, contractAddress, betType, param1, param2, amount, endBlock } = body;
         if (!betId || !wallet) {
           res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'betId and wallet are required' }));
@@ -329,7 +329,7 @@ export function startHealthServer(oracle, resolver) {
           const bt = Number(betType);
           const direction = bt === 1 ? (String(param1) === '1' ? 'over' : 'under') : null;
           const threshold = bt === 1 && param2 ? (Number(param2) / 100).toFixed(1) : null;
-          notifyEntry({ betId: Number(betId), wallet, direction, threshold, amount, endBlock })
+          notifyEntry({ betId: Number(betId), wallet, txId, direction, threshold, amount, endBlock })
             .catch(err => console.warn('[Telegram] Entry notify error:', err.message));
         }
 
