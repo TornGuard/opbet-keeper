@@ -11,6 +11,10 @@ const APP_URL = 'https://op-bet.vercel.app/';
 const EMOJI = {
   money:  '5280862672131204613', // 💰
   fire:   '6048796704327606386', // 🔥
+  over:   '5461022613029526739', // 🔼
+  under:  '5461074294370999997', // 🔽
+  globe:  '5280658777148760247', // 🌐
+  coin:   '5197368799954738967', // 🪙
 };
 
 if (TOKEN && CHAT_ID) {
@@ -121,11 +125,10 @@ export async function notifyStartup() {
  */
 export async function notifyEntry({ betId, wallet, txId, direction, threshold, amount, endBlock, tokenSymbol }) {
   console.log(`[Telegram] notifyEntry #${betId} wallet=${wallet || 'anon'} dir=${direction} threshold=${threshold}`);
-  const who      = shortWallet(wallet);
-  const dirEmoji = direction === 'over' ? '📈' : direction === 'under' ? '📉' : '🎯';
-  const symbol   = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
-  const amtNum   = amount ? (Number(amount) / 1e18).toFixed(2) : null;
-  const txUrl    = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
+  const who    = shortWallet(wallet);
+  const symbol = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
+  const amtNum = amount ? (Number(amount) / 1e18).toFixed(2) : null;
+  const txUrl  = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
 
   const msg = new Msg()
     .plain('🟢 ').bold('New Bet Placed!')
@@ -135,11 +138,13 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
     .nl();
 
   if (direction && threshold) {
-    msg.plain(`${dirEmoji} `).bold(`${direction.toUpperCase()} ${threshold} sat/vB`).nl();
+    const dirKey = direction === 'over' ? 'over' : 'under';
+    const dirBase = direction === 'over' ? '🔼' : '🔽';
+    msg.emoji(dirBase, EMOJI[dirKey]).plain(' ').bold(`${direction.toUpperCase()} ${threshold} sat/vB`).nl();
   }
 
   if (amtNum) {
-    msg.emoji('💰', EMOJI.money).plain(' ').bold(`${amtNum} ${symbol}`).nl();
+    msg.emoji('🪙', EMOJI.coin).plain(' ').bold(`${amtNum} ${symbol}`).nl();
   }
 
   if (endBlock) {
@@ -151,7 +156,7 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
   if (txUrl) {
     msg.emoji('🔥', EMOJI.fire).plain(' ').link('View Tx', txUrl).plain('  ·  ');
   }
-  msg.plain('🎰 ').link('Place Your Bet', APP_URL);
+  msg.emoji('🌐', EMOJI.globe).plain(' ').link('Place Your Bet', APP_URL);
 
   await sendMessage(msg.build());
 }
@@ -182,16 +187,17 @@ export async function notifyWin({ betId, wallet, payout, direction, threshold })
   msg.nl(2).plain('👤 ').code(who).nl();
 
   if (direction && threshold) {
-    const dirEmoji = direction === 'over' ? '📈' : '📉';
-    msg.plain(`${dirEmoji} `).bold(`${direction.toUpperCase()} ${threshold} sat/vB`).nl();
+    const dirKey  = direction === 'over' ? 'over' : 'under';
+    const dirBase = direction === 'over' ? '🔼' : '🔽';
+    msg.emoji(dirBase, EMOJI[dirKey]).plain(' ').bold(`${direction.toUpperCase()} ${threshold} sat/vB`).nl();
   }
 
-  msg.plain('💵 Payout: ').bold(payoutStr).nl(2);
+  msg.emoji('🪙', EMOJI.coin).plain(' Payout: ').bold(payoutStr).nl(2);
 
   if (explorerUrl) {
     msg.emoji('🔥', EMOJI.fire).plain(' ').link('View Wallet', explorerUrl).plain('  ·  ');
   }
-  msg.plain('🎰 ').link('Place Your Bet', APP_URL);
+  msg.emoji('🌐', EMOJI.globe).plain(' ').link('Place Your Bet', APP_URL);
 
   await sendMessage(msg.build());
 }
@@ -207,7 +213,7 @@ export async function notifyStreak({ wallet, streak }) {
     .nl()
     .code(who).plain(' is on fire!')
     .nl(2)
-    .plain('🎰 ').link('Think you can beat them?', APP_URL)
+    .emoji('🌐', EMOJI.globe).plain(' ').link('Think you can beat them?', APP_URL)
     .build();
   await sendMessage(msg);
 }
