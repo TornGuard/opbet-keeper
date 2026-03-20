@@ -7,6 +7,7 @@
 
 import http from 'http';
 import { pool, registerBetOwner, getBetsByWallet, getBetsByIds, getAllBettors, getRecentBets } from './db.js';
+import { notifyEntry } from './telegram.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -315,13 +316,23 @@ export function startHealthServer(oracle, resolver) {
       // ── POST /api/bets — frontend registers bet ownership ──
       if (req.method === 'POST' && url.pathname === '/api/bets') {
         const body = await readBody(req);
-        const { betId, wallet, tokenSymbol, contractAddress } = body;
+        const { betId, wallet, tokenSymbol, contractAddress, betType, param1, param2, amount, endBlock } = body;
         if (!betId || !wallet) {
           res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'betId and wallet are required' }));
           return;
         }
         await registerBetOwner({ betId: Number(betId), wallet, tokenSymbol, contractAddress });
+
+        // Notify Telegram immediately on bet placement (tx just confirmed)
+        if (betType !== undefined) {
+          const bt = Number(betType);
+          const direction = bt === 1 ? (String(param1) === '1' ? 'over' : 'under') : null;
+          const threshold = bt === 1 && param2 ? (Number(param2) / 100).toFixed(1) : null;
+          notifyEntry({ betId: Number(betId), wallet, direction, threshold, amount, endBlock })
+            .catch(err => console.warn('[Telegram] Entry notify error:', err.message));
+        }
+
         res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
         return;

@@ -11,7 +11,7 @@
 
 import { CONFIG } from './config.js';
 import { upsertBet, markBetResolved, upsertBetOwner, getBetWithWallet, getConsecutiveWins } from './db.js';
-import { notifyEntry, notifyWin, notifyStreak } from './telegram.js';
+import { notifyWin, notifyStreak } from './telegram.js';
 
 const STATUS_ACTIVE = 0n;
 
@@ -27,7 +27,6 @@ export class BetResolver {
     this.backfilling = false; // prevents concurrent backfills
     this.resolvedIds = new Set();
     this.betCooldown = new Map(); // betId → timestamp of last backfill attempt
-    this.entryAnnouncedIds = new Set(); // betIds already announced via Telegram
     this.oracle = null; // Set by index.js after construction
   }
 
@@ -124,17 +123,6 @@ export class BetResolver {
               .catch((err) => console.warn('[DB] upsertBetOwner failed:', err.message));
           }
         } catch { /* non-fatal */ }
-
-        // Announce new entries via Telegram (once per bet, after owner is indexed)
-        if (!this.entryAnnouncedIds.has(i)) {
-          this.entryAnnouncedIds.add(i);
-          try {
-            const direction = betType === 1n ? (param1 === 1n ? 'over' : 'under') : null;
-            const threshold = betType === 1n && param2 ? (Number(param2) / 100).toFixed(1) : null;
-            const betInfo = await getBetWithWallet(i);
-            await notifyEntry({ betId: i, wallet: betInfo?.wallet || null, direction, threshold, amount, endBlock });
-          } catch (err) { console.warn('[Telegram] Entry notify error:', err.message); }
-        }
 
         // resolveBet needs data for BOTH endBlock AND endBlock-1
         const endBlockData = await this.contract.getBlockData(BigInt(endBlock));
