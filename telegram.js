@@ -32,6 +32,21 @@ function shortWallet(wallet) {
 }
 
 /**
+ * Notify when a new bet entry is placed.
+ */
+export async function notifyEntry({ betId, wallet, direction, threshold, amount, endBlock }) {
+  const who    = shortWallet(wallet);
+  const dirStr = direction && threshold
+    ? `<b>${direction.toUpperCase()} ${threshold} sat/vB</b>`
+    : '<b>a bet</b>';
+  const amtStr   = amount   ? ` · ${(Number(amount) / 1e18).toFixed(0)} MOTO` : '';
+  const blockStr = endBlock ? ` · ends block #${endBlock}` : '';
+
+  const text = `🎰 New entry!\n<code>${who}</code> bet ${dirStr}${amtStr}${blockStr}\n\n👉 <a href="${APP_URL}">Place your bet on OP_BET</a>`;
+  await sendMessage(text);
+}
+
+/**
  * Notify when a bet is won.
  * @param {object} opts
  * @param {number}  opts.betId
