@@ -133,6 +133,53 @@ export async function getBetsByIds(ids, contractAddress) {
 }
 
 /**
+ * Return the most recent N bets across all wallets (for live feed).
+ */
+export async function getRecentBets(contractAddress, limit = 20) {
+  const contractFilter = contractAddress ? ' AND contract_address = $2' : '';
+  const params = contractAddress ? [limit, contractAddress] : [limit];
+  const result = await pool.query(
+    `SELECT bet_id, bet_type, param1, param2, amount, end_block, status, won, payout, wallet, token_symbol, placed_at, resolved_at
+     FROM bets
+     WHERE TRUE${contractFilter}
+     ORDER BY bet_id DESC
+     LIMIT $1`,
+    params,
+  );
+  return result.rows;
+}
+
+/**
+ * Get wallet + bet params for a single bet (used for Telegram notification).
+ */
+export async function getBetWithWallet(betId) {
+  const result = await pool.query(
+    `SELECT wallet, param1, param2, bet_type FROM bets WHERE bet_id = $1`,
+    [betId],
+  );
+  return result.rows[0] || null;
+}
+
+/**
+ * Count consecutive wins for a wallet (streak detection).
+ */
+export async function getConsecutiveWins(wallet) {
+  const result = await pool.query(
+    `SELECT won FROM bets
+     WHERE wallet = $1 AND won IS NOT NULL
+     ORDER BY bet_id DESC
+     LIMIT 10`,
+    [wallet.toLowerCase()],
+  );
+  let streak = 0;
+  for (const row of result.rows) {
+    if (row.won === true) streak++;
+    else break;
+  }
+  return streak;
+}
+
+/**
  * Return all bets (admin/debug use).
  */
 export async function getAllBets() {

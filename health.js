@@ -6,7 +6,7 @@
  */
 
 import http from 'http';
-import { pool, registerBetOwner, getBetsByWallet, getBetsByIds, getAllBettors } from './db.js';
+import { pool, registerBetOwner, getBetsByWallet, getBetsByIds, getAllBettors, getRecentBets } from './db.js';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -348,6 +348,38 @@ export function startHealthServer(oracle, resolver) {
 
         res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
         res.end(JSON.stringify(bets));
+        return;
+      }
+
+      // ── GET /api/bets/recent — latest bets across all wallets (live feed) ──
+      if (req.method === 'GET' && url.pathname === '/api/bets/recent') {
+        const contract = url.searchParams.get('contract') || null;
+        const limit = Math.min(Number(url.searchParams.get('limit') || 20), 50);
+        const bets = await getRecentBets(contract, limit);
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(bets));
+        return;
+      }
+
+      // ── GET /api/leaderboard — top 10 wallets by payout ──
+      if (req.method === 'GET' && url.pathname === '/api/leaderboard') {
+        const contractAddress = url.searchParams.get('contract') || null;
+        const contractFilter = contractAddress ? ' AND contract_address = $1' : '';
+        const params = contractAddress ? [contractAddress] : [];
+        const result = await pool.query(
+          `SELECT wallet,
+             COUNT(*) FILTER (WHERE won = true)::int  AS wins,
+             COUNT(*) FILTER (WHERE won = false)::int AS losses,
+             COALESCE(SUM(payout::numeric) FILTER (WHERE won = true), 0)::text AS total_payout
+           FROM bets
+           WHERE wallet IS NOT NULL${contractFilter}
+           GROUP BY wallet
+           ORDER BY total_payout::numeric DESC
+           LIMIT 10`,
+          params,
+        );
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result.rows));
         return;
       }
 

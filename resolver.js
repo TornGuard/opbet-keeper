@@ -10,7 +10,8 @@
  */
 
 import { CONFIG } from './config.js';
-import { upsertBet, markBetResolved, upsertBetOwner } from './db.js';
+import { upsertBet, markBetResolved, upsertBetOwner, getBetWithWallet, getConsecutiveWins } from './db.js';
+import { notifyWin, notifyStreak } from './telegram.js';
 
 const STATUS_ACTIVE = 0n;
 
@@ -192,6 +193,26 @@ export class BetResolver {
 
         await markBetResolved({ betId: i, won, payout, txId: receipt.transactionId })
           .catch((err) => console.warn('[DB] markBetResolved failed:', err.message));
+
+        // Telegram notifications
+        if (won) {
+          try {
+            const betInfo = await getBetWithWallet(i);
+            const wallet = betInfo?.wallet || null;
+            let direction = null, threshold = null;
+            if (betInfo?.bet_type === 1) {
+              direction = betInfo.param1 === '1' ? 'over' : 'under';
+              threshold = betInfo.param2 ? (Number(betInfo.param2) / 100).toFixed(1) : null;
+            }
+            await notifyWin({ betId: i, wallet, payout, direction, threshold });
+            if (wallet) {
+              const streak = await getConsecutiveWins(wallet);
+              if (streak >= 3) await notifyStreak({ wallet, streak });
+            }
+          } catch (err) {
+            console.warn('[Telegram] Notification error:', err.message);
+          }
+        }
 
         this.resolvedIds.add(i);
         resolved++;
