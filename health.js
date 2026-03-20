@@ -326,10 +326,7 @@ export function startHealthServer(oracle, resolver) {
 
         // Notify Telegram immediately on bet placement (tx just confirmed)
         if (betType !== undefined) {
-          const bt = Number(betType);
-          const direction = bt === 1 ? (String(param1) === '1' ? 'over' : 'under') : null;
-          const threshold = bt === 1 && param2 ? (Number(param2) / 100).toFixed(1) : null;
-          notifyEntry({ betId: Number(betId), wallet, txId, direction, threshold, amount, endBlock, tokenSymbol })
+          notifyEntry({ betId: Number(betId), wallet, txId, betType, param1, param2, amount, endBlock, tokenSymbol })
             .catch(err => console.warn('[Telegram] Entry notify error:', err.message));
         }
 

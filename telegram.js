@@ -107,6 +107,42 @@ function shortWallet(wallet) {
   return `${wallet.slice(0, 10)}...${wallet.slice(-4)}`;
 }
 
+// Decode human-readable bet description from betType + params
+function decodeBet(betType, param1, param2) {
+  const bt = Number(betType);
+  const p1 = Number(param1);
+  const p2 = Number(param2);
+  switch (bt) {
+    case 1: { // OVER_UNDER
+      const dir  = p1 === 1 ? 'over' : 'under';
+      const thr  = p2 ? (p2 / 100).toFixed(1) : null;
+      return { type: 'OVER/UNDER', dir, threshold: thr };
+    }
+    case 2: { // EXACT
+      const fee = (p1 / 100).toFixed(2);
+      return { type: 'EXACT', label: `Exact ${fee} sat/vB` };
+    }
+    case 3: { // TREND
+      const dir = p1 === 1 ? 'UP' : 'DOWN';
+      return { type: 'TREND', label: `Fees ${dir}`, dir: p1 === 1 ? 'over' : 'under' };
+    }
+    case 4: { // MEMPOOL
+      const opts = { 1: 'Over 15K (+6 blocks)', 2: 'Under 10K (+6 blocks)', 3: 'Over 20K (+12 blocks)', 4: 'Under 5K (+12 blocks)' };
+      return { type: 'MEMPOOL', label: opts[p1] || `Option ${p1}` };
+    }
+    case 5: { // BLOCKTIME
+      const opts = { 1: '< 5 min', 2: '5–10 min', 3: '10–20 min', 4: '20+ min' };
+      return { type: 'BLOCKTIME', label: `Block in ${opts[p1] || p1}` };
+    }
+    case 6: { // SPIKE
+      const opts = { 1: '50+ sat/vB', 2: '100+ sat/vB', 3: '200+ sat/vB', 4: '500+ sat/vB' };
+      return { type: 'SPIKE', label: `Fee spike ${opts[p1] || p1}` };
+    }
+    default:
+      return { type: `Type ${bt}`, label: `Param ${p1}` };
+  }
+}
+
 /**
  * Startup ping — confirms bot is reachable.
  */
@@ -124,13 +160,14 @@ export async function notifyStartup() {
 /**
  * New bet placed.
  */
-export async function notifyEntry({ betId, wallet, txId, direction, threshold, amount, endBlock, tokenSymbol }) {
-  console.log(`[Telegram] notifyEntry #${betId} wallet=${wallet || 'anon'} dir=${direction} threshold=${threshold}`);
-  const who      = shortWallet(wallet);
-  const symbol   = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
+export async function notifyEntry({ betId, wallet, txId, betType, param1, param2, amount, endBlock, tokenSymbol }) {
+  console.log(`[Telegram] notifyEntry #${betId} wallet=${wallet || 'anon'} betType=${betType} param1=${param1}`);
+  const who       = shortWallet(wallet);
+  const symbol    = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
   const coinEmoji = (symbol === '$MOTO') ? { base: '🔥', id: EMOJI.moto } : { base: '🪙', id: EMOJI.coin };
-  const amtNum   = amount ? (Number(amount) / 1e18).toFixed(2) : null;
-  const txUrl    = txId ? `https://opscan.org/transactions/${txId}?network=op_testnet` : null;
+  const amtNum    = amount ? (Number(amount) / 1e18).toFixed(2) : null;
+  const txUrl     = txId ? `https://opscan.org/transactions/${txId}?network=op_testnet` : null;
+  const bet       = betType ? decodeBet(betType, param1, param2) : null;
 
   const msg = new Msg()
     .plain('🟢 ').bold('New Bet Placed!')
@@ -139,10 +176,18 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
     .plain('👤 ').code(who)
     .nl();
 
-  if (direction && threshold) {
-    const dirKey = direction === 'over' ? 'over' : 'under';
-    const dirBase = direction === 'over' ? '🔼' : '🔽';
-    msg.emoji(dirBase, EMOJI[dirKey]).plain(' ').bold(`${direction.toUpperCase()} ${threshold} sat/vB`).nl();
+  if (bet) {
+    if (bet.type === 'OVER/UNDER' && bet.dir && bet.threshold) {
+      const dirKey  = bet.dir === 'over' ? 'over' : 'under';
+      const dirBase = bet.dir === 'over' ? '🔼' : '🔽';
+      msg.emoji(dirBase, EMOJI[dirKey]).plain(' ').bold(`${bet.dir.toUpperCase()} ${bet.threshold} sat/vB`).nl();
+    } else if (bet.type === 'TREND' && bet.dir) {
+      const dirKey  = bet.dir === 'over' ? 'over' : 'under';
+      const dirBase = bet.dir === 'over' ? '🔼' : '🔽';
+      msg.emoji(dirBase, EMOJI[dirKey]).plain(' ').bold(bet.label).nl();
+    } else if (bet.label) {
+      msg.plain(`📊 `).bold(`${bet.type}: `).plain(bet.label).nl();
+    }
   }
 
   if (amtNum) {
