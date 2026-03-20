@@ -205,6 +205,8 @@ export async function notifyEntry({ betId, wallet, txId, betType, param1, param2
   }
   msg.emoji('🌐', EMOJI.globe).plain(' ').link('Place Your Bet', APP_URL);
 
+  msg.nl(2).italic('🧪 OPNet Testnet — transactions are not real value');
+
   await sendMessage(msg.build());
 }
 
