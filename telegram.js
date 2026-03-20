@@ -15,6 +15,7 @@ const EMOJI = {
   under:  '5461074294370999997', // 🔽
   globe:  '5280658777148760247', // 🌐
   coin:   '5197368799954738967', // 🪙
+  moto:   '6190296832845814946', // 🔥 (MOTO token)
 };
 
 if (TOKEN && CHAT_ID) {
@@ -125,10 +126,11 @@ export async function notifyStartup() {
  */
 export async function notifyEntry({ betId, wallet, txId, direction, threshold, amount, endBlock, tokenSymbol }) {
   console.log(`[Telegram] notifyEntry #${betId} wallet=${wallet || 'anon'} dir=${direction} threshold=${threshold}`);
-  const who    = shortWallet(wallet);
-  const symbol = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
-  const amtNum = amount ? (Number(amount) / 1e18).toFixed(2) : null;
-  const txUrl  = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
+  const who      = shortWallet(wallet);
+  const symbol   = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
+  const coinEmoji = (symbol === '$MOTO') ? { base: '🔥', id: EMOJI.moto } : { base: '🪙', id: EMOJI.coin };
+  const amtNum   = amount ? (Number(amount) / 1e18).toFixed(2) : null;
+  const txUrl    = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
 
   const msg = new Msg()
     .plain('🟢 ').bold('New Bet Placed!')
@@ -144,7 +146,7 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
   }
 
   if (amtNum) {
-    msg.emoji('🪙', EMOJI.coin).plain(' ').bold(`${amtNum} ${symbol}`).nl();
+    msg.emoji(coinEmoji.base, coinEmoji.id).plain(' ').bold(`${amtNum} ${symbol}`).nl();
   }
 
   if (endBlock) {
@@ -164,13 +166,15 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
 /**
  * Bet won.
  */
-export async function notifyWin({ betId, wallet, payout, direction, threshold }) {
+export async function notifyWin({ betId, wallet, payout, direction, threshold, tokenSymbol }) {
   const payoutNum = Number(payout) / 1e18;
   if (payoutNum < 1) return;
 
-  const payoutStr = payoutNum >= 1000
-    ? `${(payoutNum / 1000).toFixed(1)}k MOTO`
-    : `${payoutNum.toFixed(2)} MOTO`;
+  const symbol     = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
+  const coinEmoji  = (symbol === '$MOTO') ? { base: '🔥', id: EMOJI.moto } : { base: '🪙', id: EMOJI.coin };
+  const payoutStr  = payoutNum >= 1000
+    ? `${(payoutNum / 1000).toFixed(1)}k ${symbol}`
+    : `${payoutNum.toFixed(2)} ${symbol}`;
 
   const who    = shortWallet(wallet);
   const isBig  = payoutNum >= 500;
@@ -192,7 +196,7 @@ export async function notifyWin({ betId, wallet, payout, direction, threshold })
     msg.emoji(dirBase, EMOJI[dirKey]).plain(' ').bold(`${direction.toUpperCase()} ${threshold} sat/vB`).nl();
   }
 
-  msg.emoji('🪙', EMOJI.coin).plain(' Payout: ').bold(payoutStr).nl(2);
+  msg.emoji(coinEmoji.base, coinEmoji.id).plain(' Payout: ').bold(payoutStr).nl(2);
 
   if (explorerUrl) {
     msg.emoji('🔥', EMOJI.fire).plain(' ').link('View Wallet', explorerUrl).plain('  ·  ');

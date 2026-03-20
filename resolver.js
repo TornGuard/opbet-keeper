@@ -204,7 +204,7 @@ export class BetResolver {
               direction = betInfo.param1 === '1' ? 'over' : 'under';
               threshold = betInfo.param2 ? (Number(betInfo.param2) / 100).toFixed(1) : null;
             }
-            await notifyWin({ betId: i, wallet, payout, direction, threshold });
+            await notifyWin({ betId: i, wallet, payout, direction, threshold, tokenSymbol: betInfo?.token_symbol || null });
             if (wallet) {
               const streak = await getConsecutiveWins(wallet);
               if (streak >= 3) await notifyStreak({ wallet, streak });
