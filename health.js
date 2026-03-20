@@ -98,7 +98,7 @@ function sparkline(feeds) {
 function renderHTML(stats) {
   const fix2 = (v) => v != null ? Number(v).toFixed(2) : '—';
   const shortTx = (tx) => tx
-    ? `<a href="https://testnet.opnet.org/tx/${tx}" target="_blank" title="${tx}">${tx.slice(0, 8)}…${tx.slice(-6)}</a>`
+    ? `<a href="https://opscan.org/transactions/${tx}?network=op_testnet" target="_blank" title="${tx}">${tx.slice(0, 8)}…${tx.slice(-6)}</a>`
     : '—';
   const fmtTime = (d) => d ? new Date(d).toLocaleTimeString('en-GB', { hour12: false }) : '—';
   const fmtDate = (d) => d ? new Date(d).toISOString().replace('T', ' ').slice(0, 16) : '—';

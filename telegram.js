@@ -130,7 +130,7 @@ export async function notifyEntry({ betId, wallet, txId, direction, threshold, a
   const symbol   = tokenSymbol ? `$${tokenSymbol}` : '$MOTO';
   const coinEmoji = (symbol === '$MOTO') ? { base: '🔥', id: EMOJI.moto } : { base: '🪙', id: EMOJI.coin };
   const amtNum   = amount ? (Number(amount) / 1e18).toFixed(2) : null;
-  const txUrl    = txId ? `https://testnet.opnet.org/tx/${txId}` : null;
+  const txUrl    = txId ? `https://opscan.org/transactions/${txId}?network=op_testnet` : null;
 
   const msg = new Msg()
     .plain('🟢 ').bold('New Bet Placed!')
