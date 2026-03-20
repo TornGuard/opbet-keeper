@@ -176,9 +176,8 @@ export async function notifyWin({ betId, wallet, payout, direction, threshold, t
     ? `${(payoutNum / 1000).toFixed(1)}k ${symbol}`
     : `${payoutNum.toFixed(2)} ${symbol}`;
 
-  const who    = shortWallet(wallet);
-  const isBig  = payoutNum >= 500;
-  const explorerUrl = wallet ? `https://testnet.opnet.org/address/${wallet}` : null;
+  const who   = shortWallet(wallet);
+  const isBig = payoutNum >= 500;
 
   const msg = new Msg();
 
@@ -198,9 +197,6 @@ export async function notifyWin({ betId, wallet, payout, direction, threshold, t
 
   msg.emoji(coinEmoji.base, coinEmoji.id).plain(' Payout: ').bold(payoutStr).nl(2);
 
-  if (explorerUrl) {
-    msg.emoji('🔥', EMOJI.fire).plain(' ').link('View Wallet', explorerUrl).plain('  ·  ');
-  }
   msg.emoji('🌐', EMOJI.globe).plain(' ').link('Place Your Bet', APP_URL);
 
   await sendMessage(msg.build());
