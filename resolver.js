@@ -115,17 +115,6 @@ export class BetResolver {
         await upsertBet({ betId: i, betType, param1, param2, amount, endBlock, contractAddress: CONFIG.marketAddress })
           .catch((err) => console.warn('[DB] upsertBet failed:', err.message));
 
-        // Announce new entries via Telegram (once per bet)
-        if (!this.entryAnnouncedIds.has(i)) {
-          this.entryAnnouncedIds.add(i);
-          try {
-            const direction = betType === 1n ? (param1 === 1n ? 'over' : 'under') : null;
-            const threshold = betType === 1n && param2 ? (Number(param2) / 100).toFixed(1) : null;
-            const betInfo = await getBetWithWallet(i);
-            await notifyEntry({ betId: i, wallet: betInfo?.wallet || null, direction, threshold, amount, endBlock });
-          } catch (err) { console.warn('[Telegram] Entry notify error:', err.message); }
-        }
-
         // Index the bet owner for airdrop tracking
         try {
           const ownerResult = await this.contract.getBetOwner(betId);
@@ -135,6 +124,17 @@ export class BetResolver {
               .catch((err) => console.warn('[DB] upsertBetOwner failed:', err.message));
           }
         } catch { /* non-fatal */ }
+
+        // Announce new entries via Telegram (once per bet, after owner is indexed)
+        if (!this.entryAnnouncedIds.has(i)) {
+          this.entryAnnouncedIds.add(i);
+          try {
+            const direction = betType === 1n ? (param1 === 1n ? 'over' : 'under') : null;
+            const threshold = betType === 1n && param2 ? (Number(param2) / 100).toFixed(1) : null;
+            const betInfo = await getBetWithWallet(i);
+            await notifyEntry({ betId: i, wallet: betInfo?.wallet || null, direction, threshold, amount, endBlock });
+          } catch (err) { console.warn('[Telegram] Entry notify error:', err.message); }
+        }
 
         // resolveBet needs data for BOTH endBlock AND endBlock-1
         const endBlockData = await this.contract.getBlockData(BigInt(endBlock));
