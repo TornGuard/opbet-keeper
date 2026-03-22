@@ -1,7 +1,42 @@
 /**
- * FeeBet_Market ABI subset used by keeper bot.
+ * Contract ABIs used by keeper bot.
  * Only includes methods the keeper calls + reads.
  */
+
+export const PRICE_ORACLE_ABI = [
+  {
+    name: 'updatePrice',
+    type: 'function',
+    constant: false,
+    inputs: [
+      { name: 'symbolId', type: 'UINT256' },
+      { name: 'price', type: 'UINT256' },
+      { name: 'confidence', type: 'UINT256' },
+    ],
+    outputs: [{ name: 'success', type: 'BOOL' }],
+  },
+  {
+    name: 'getPrice',
+    type: 'function',
+    constant: true,
+    inputs: [{ name: 'symbolId', type: 'UINT256' }],
+    outputs: [
+      { name: 'price', type: 'UINT256' },
+      { name: 'updateBlock', type: 'UINT256' },
+      { name: 'confidence', type: 'UINT256' },
+      { name: 'isFresh', type: 'BOOL' },
+    ],
+  },
+  {
+    name: 'isFeeder',
+    type: 'function',
+    constant: true,
+    inputs: [{ name: 'feeder', type: 'ADDRESS' }],
+    outputs: [{ name: 'authorized', type: 'BOOL' }],
+  },
+];
+
+
 
 export const MARKET_ABI = [
   {

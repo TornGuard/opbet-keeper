@@ -43,4 +43,11 @@ export const CONFIG = {
 
   // Max sats the keeper is willing to spend per transaction
   maxSatsPerTx: 100_000n,
+
+  // BlockFeed Price Oracle (on-chain)
+  // Set PRICE_ORACLE_ADDRESS after deploying contracts/oracle/build/PriceOracle.wasm
+  priceOracleAddress: process.env.PRICE_ORACLE_ADDRESS || '',
+
+  // BlockFeed API base URL — used to read the latest BTC/USD price
+  blockfeedApiUrl: process.env.BLOCKFEED_API_URL || 'http://localhost:3001',
 };

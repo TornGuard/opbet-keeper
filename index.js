@@ -15,11 +15,13 @@
  */
 
 import { CONFIG } from './config.js';
-import { MARKET_ABI } from './abi.js';
+import { MARKET_ABI, PRICE_ORACLE_ABI } from './abi.js';
 import { OracleFeeder } from './oracle.js';
 import { BetResolver } from './resolver.js';
+import { PriceSubmitter } from './price-submitter.js';
 import { initDb } from './db.js';
 import { startHealthServer } from './health.js';
+import { notifyStartup } from './telegram.js';
 
 async function main() {
   if (!CONFIG.mnemonic && !CONFIG.deployerWif) {
@@ -113,8 +115,40 @@ async function main() {
   resolver.oracle = oracle;
   resolver.start();
 
+  // Start BTC/USD price submitter (reads BlockFeed, submits to PriceOracle contract)
+  if (CONFIG.priceOracleAddress) {
+    const oracleContract = getContract(
+      CONFIG.priceOracleAddress,
+      PRICE_ORACLE_ABI,
+      provider,
+      network,
+      wallet.address,
+    );
+
+    // Verify keeper is authorized as a feeder
+    try {
+      const check = await oracleContract.isFeeder(wallet.address);
+      if (check.revert || !check.properties?.authorized) {
+        console.warn('[PriceSubmitter] Keeper wallet is NOT an authorized feeder — skipping price submissions');
+        console.warn('[PriceSubmitter] Call addFeeder() with the keeper address to authorize it');
+      } else {
+        console.log('[PriceSubmitter] Keeper is authorized feeder — starting');
+        const priceSubmitter = new PriceSubmitter(oracleContract, wallet, provider, network);
+        priceSubmitter.start();
+      }
+    } catch (err) {
+      console.warn('[PriceSubmitter] Could not verify feeder status:', err.message);
+    }
+  } else {
+    console.log('[PriceSubmitter] PRICE_ORACLE_ADDRESS not set — price submissions disabled');
+    console.log('[PriceSubmitter] Deploy contracts/oracle/build/PriceOracle.wasm and set PRICE_ORACLE_ADDRESS');
+  }
+
   // Start health HTTP server
   startHealthServer(oracle, resolver);
+
+  // Telegram startup ping (confirms bot token + chat ID are working)
+  notifyStartup();
 
   // Graceful shutdown
   const shutdown = () => {

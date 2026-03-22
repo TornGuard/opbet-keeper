@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "pm2": "pm2 start ecosystem.config.cjs"
+    "pm2": "pm2 start ecosystem.config.cjs",
+    "deploy:oracle": "node deploy-oracle.js",
+    "balance": "node deploy-oracle.js balance"
   },
   "dependencies": {
     "@btc-vision/bitcoin": "latest",
