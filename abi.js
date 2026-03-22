@@ -28,6 +28,13 @@ export const PRICE_ORACLE_ABI = [
     ],
   },
   {
+    name: 'latestPrice',
+    type: 'function',
+    constant: true,
+    inputs: [{ name: 'symbolId', type: 'UINT256' }],
+    outputs: [{ name: 'price', type: 'UINT256' }],
+  },
+  {
     name: 'isFeeder',
     type: 'function',
     constant: true,
