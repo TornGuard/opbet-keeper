@@ -119,14 +119,16 @@ export class PriceSubmitter {
   async poll() {
     if (!this.running) return;
 
-    let data;
+    let json;
     try {
-      data = await this.fetchLatestPrice();
+      json = await this.fetchLatestPrice();
     } catch (err) {
       console.warn('[PriceSubmitter] Failed to fetch BlockFeed price:', err.message);
       return;
     }
 
+    // BlockFeed wraps responses as { ok, data: {...} }
+    const data       = json.data ?? json;
     const price      = parseFloat(data.price);
     const confidence = parseFloat(data.confidence);
 
