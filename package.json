@@ -9,7 +9,9 @@
     "dev": "node --watch index.js",
     "pm2": "pm2 start ecosystem.config.cjs",
     "deploy:oracle": "node deploy-oracle.js",
-    "balance": "node deploy-oracle.js balance"
+    "balance": "node deploy-oracle.js balance",
+    "presale-watcher": "node presale-watcher.js",
+    "presale-watcher:mainnet": "IS_MAINNET=1 node presale-watcher.js"
   },
   "dependencies": {
     "@btc-vision/bitcoin": "latest",

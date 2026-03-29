@@ -5,7 +5,8 @@
 
 const TOKEN   = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const APP_URL = 'https://op-bet.vercel.app/';
+const APP_URL  = 'https://op-bet.vercel.app/';
+const MINT_URL = 'https://mint.op-bet.xyz/';
 
 // Custom emoji IDs (Telegram Premium)
 const EMOJI = {
@@ -245,6 +246,71 @@ export async function notifyWin({ betId, wallet, payout, direction, threshold, t
   msg.emoji(coinEmoji.base, coinEmoji.id).plain(' Payout: ').bold(payoutStr).nl(2);
 
   msg.emoji('🌐', EMOJI.globe).plain(' ').link('Place Your Bet', APP_URL);
+
+  await sendMessage(msg.build());
+}
+
+/**
+ * Presale mint recorded on-chain (RaisePurchase event).
+ * @param {object} p
+ * @param {string} p.txid        - Bitcoin TXID
+ * @param {string} p.buyer       - buyer address (hex or p2tr)
+ * @param {bigint} p.satsPaid    - sats the buyer sent
+ * @param {bigint} p.opbetOwed   - OPBET allocated (18-decimal)
+ * @param {boolean} [p.isMainnet]
+ */
+export async function notifyMint({ txid, buyer, satsPaid, opbetOwed, blockHeight, isMainnet = false }) {
+  const who    = buyer    ? `${buyer.slice(0, 10)}...${buyer.slice(-4)}` : 'anon';
+  const opbet  = opbetOwed ? (Number(opbetOwed) / 1e18).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '?';
+  const btc    = satsPaid  ? (Number(satsPaid)  / 1e8 ).toFixed(6) : '?';
+  const txUrl = txid
+    ? isMainnet
+      ? `https://opscan.org/transactions/${txid}`
+      : `https://opscan.org/transactions/${txid}?network=op_testnet`
+    : null;
+
+  const msg = new Msg()
+    .plain('🟢 ').bold('New Mint!')
+    .nl(2)
+    .plain('👤 ').code(who).nl()
+    .emoji('💰', EMOJI.money).plain(' ').bold(`${btc} BTC`).plain(' paid').nl()
+    .emoji('🪙', EMOJI.coin).plain(' ').bold(`${opbet} $OPBET`).plain(' owed').nl(2);
+
+  if (txUrl) {
+    msg.emoji('🔥', EMOJI.fire).plain(' ').link('View on OPScan', txUrl).nl();
+  }
+  msg.emoji('🌐', EMOJI.globe).plain(' ').link('mint.op-bet.xyz', MINT_URL);
+
+  await sendMessage(msg.build());
+}
+
+/**
+ * Airdrop claim registered on-chain (AirdropRegistered event).
+ * @param {object} p
+ * @param {string} p.txid        - Bitcoin TXID
+ * @param {string} p.claimant    - claimant address
+ * @param {bigint} p.amount      - OPBET amount (18-decimal)
+ * @param {boolean} [p.isMainnet]
+ */
+export async function notifyClaim({ txid, claimant, amount, blockHeight, isMainnet = false }) {
+  const who    = claimant ? `${claimant.slice(0, 10)}...${claimant.slice(-4)}` : 'anon';
+  const opbet  = amount   ? (Number(amount) / 1e18).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '?';
+  const txUrl = txid
+    ? isMainnet
+      ? `https://opscan.org/transactions/${txid}`
+      : `https://opscan.org/transactions/${txid}?network=op_testnet`
+    : null;
+
+  const msg = new Msg()
+    .emoji('🔥', EMOJI.fire).plain(' ').bold('Airdrop Claim!')
+    .nl(2)
+    .plain('👤 ').code(who).nl()
+    .emoji('🪙', EMOJI.coin).plain(' ').bold(`${opbet} $OPBET`).nl(2);
+
+  if (txUrl) {
+    msg.emoji('🔥', EMOJI.fire).plain(' ').link('View on OPScan', txUrl).nl();
+  }
+  msg.emoji('🌐', EMOJI.globe).plain(' ').link('mint.op-bet.xyz', MINT_URL);
 
   await sendMessage(msg.build());
 }
