@@ -1,0 +1,259 @@
+/**
+ * Bet Resolver
+ *
+ * Periodically scans all active bets and resolves any whose target/endBlock
+ * has oracle data available. Triggers oracle backfill if data is missing.
+ */
+import { CONFIG } from './config.js';
+import { upsertBet, markBetResolved, upsertBetOwner, getBetWithWallet, getConsecutiveWins } from './db.js';
+import { notifyWin, notifyStreak } from './telegram.js';
+const STATUS_ACTIVE = 0n;
+export class BetResolver {
+    contract;
+    wallet;
+    provider;
+    network;
+    interval = null;
+    running = false;
+    scanning = false;
+    backfilling = false;
+    resolvedIds = new Set();
+    betCooldown = new Map();
+    oracle = null;
+    constructor(contract, wallet, provider, network) {
+        this.contract = contract;
+        this.wallet = wallet;
+        this.provider = provider;
+        this.network = network;
+    }
+    start() {
+        this.running = true;
+        console.log(`[Resolver] Starting bet scanner (every ${CONFIG.resolveScanInterval / 1000}s)...`);
+        setTimeout(() => {
+            this.scan().catch((err) => console.error('[Resolver] Scan error:', err.message));
+        }, 5000);
+        this.interval = setInterval(() => {
+            if (!this.running)
+                return;
+            this.scan().catch((err) => console.error('[Resolver] Scan error:', err.message));
+        }, CONFIG.resolveScanInterval);
+    }
+    stop() {
+        this.running = false;
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
+    }
+    async scan() {
+        if (this.scanning) {
+            console.log('[Resolver] Scan already in progress, skipping');
+            return;
+        }
+        this.scanning = true;
+        try {
+            await this._doScan();
+        }
+        finally {
+            this.scanning = false;
+        }
+    }
+    async _doScan() {
+        let maxBetId;
+        try {
+            const result = await this.contract['getNextBetId']();
+            if (result.revert)
+                return;
+            maxBetId = Number(result.properties?.['nextBetId']);
+        }
+        catch (err) {
+            console.warn('[Resolver] Failed to get next bet ID:', err.message);
+            return;
+        }
+        if (maxBetId <= 1)
+            return;
+        let resolved = 0, active = 0, noData = 0, backfilled = 0;
+        for (let i = 1; i < maxBetId; i++) {
+            if (!this.running)
+                break;
+            if (this.resolvedIds.has(i))
+                continue;
+            const betId = BigInt(i);
+            try {
+                const info = await this.contract['getBetInfo'](betId);
+                if (info.revert)
+                    continue;
+                const status = info.properties?.['status'];
+                if (status !== STATUS_ACTIVE) {
+                    this.resolvedIds.add(i);
+                    continue;
+                }
+                active++;
+                const endBlock = Number(info.properties?.['endBlock']);
+                const betType = info.properties?.['betType'];
+                const param1 = info.properties?.['param1'];
+                const param2 = info.properties?.['param2'];
+                const amount = info.properties?.['amount'];
+                await upsertBet({ betId: i, betType, param1, param2, amount, endBlock, contractAddress: CONFIG.marketAddress })
+                    .catch((err) => console.warn('[DB] upsertBet failed:', err.message));
+                try {
+                    const ownerResult = await this.contract['getBetOwner'](betId);
+                    if (!ownerResult.revert && (BigInt(ownerResult.properties?.['owner'] ?? 0)) > 0n) {
+                        const ownerHex = '0x' + ownerResult.properties['owner'].toString(16).padStart(64, '0');
+                        await upsertBetOwner({ betId: i, ownerHex })
+                            .catch((err) => console.warn('[DB] upsertBetOwner failed:', err.message));
+                    }
+                }
+                catch { /* non-fatal */ }
+                const endBlockData = await this.contract['getBlockData'](BigInt(endBlock));
+                const hasEndData = (BigInt(endBlockData.properties?.['dataSet'] ?? 0)) > 0n;
+                const prevBlockData = await this.contract['getBlockData'](BigInt(endBlock - 1));
+                const hasPrevData = (BigInt(prevBlockData.properties?.['dataSet'] ?? 0)) > 0n;
+                if (!hasEndData || !hasPrevData) {
+                    const lastAttempt = this.betCooldown.get(i);
+                    if (lastAttempt && Date.now() - lastAttempt < 180_000) {
+                        noData++;
+                        continue;
+                    }
+                    if (this.backfilling) {
+                        noData++;
+                        continue;
+                    }
+                    if (this.oracle && this.oracle.latestBtcFee > 0) {
+                        console.log(`[Resolver] Bet #${i} needs blocks for #${endBlock}`);
+                        this.betCooldown.set(i, Date.now());
+                        const filled = await this.backfillBlocks(endBlock);
+                        if (filled) {
+                            backfilled++;
+                        }
+                        else {
+                            noData++;
+                        }
+                        continue;
+                    }
+                    noData++;
+                    continue;
+                }
+                console.log(`[Resolver] Resolving bet #${i} (type: ${betType}, endBlock: ${endBlock})...`);
+                const simulation = await this.contract['resolveBet'](betId);
+                if (simulation.revert) {
+                    console.warn(`[Resolver] Bet #${i} simulation reverted: ${simulation.revert}`);
+                    continue;
+                }
+                const challenge = await this.provider.getChallenge();
+                const receipt = await simulation.sendTransaction({
+                    signer: this.wallet.keypair,
+                    mldsaSigner: this.wallet.mldsaKeypair,
+                    refundTo: this.wallet.p2tr,
+                    maximumAllowedSatToSpend: CONFIG.maxSatsPerTx,
+                    network: this.network,
+                    feeRate: CONFIG.feeRate,
+                    challenge,
+                });
+                const won = simulation.properties?.['won'];
+                const payout = simulation.properties?.['payout'];
+                console.log(`[Resolver] Bet #${i} — ${won ? 'WON' : 'LOST'}${won ? ` (payout: ${payout})` : ''} — TX: ${receipt.transactionId}`);
+                await markBetResolved({ betId: i, won: Boolean(won), payout: payout != null ? BigInt(payout) : null, txId: receipt.transactionId })
+                    .catch((err) => console.warn('[DB] markBetResolved failed:', err.message));
+                if (won) {
+                    try {
+                        const betInfo = await getBetWithWallet(i);
+                        const wallet = betInfo?.wallet ?? null;
+                        const direction = betInfo?.bet_type === 1 ? (betInfo.param1 === '1' ? 'over' : 'under') : null;
+                        const threshold = (betInfo?.bet_type === 1 && betInfo?.param2)
+                            ? (Number(betInfo.param2) / 100).toFixed(1) : null;
+                        await notifyWin({ betId: i, wallet, payout: String(payout ?? '0'), direction, threshold, tokenSymbol: betInfo?.token_symbol ?? null });
+                        if (wallet) {
+                            const streak = await getConsecutiveWins(wallet);
+                            if (streak >= 3)
+                                await notifyStreak({ wallet, streak });
+                        }
+                    }
+                    catch (err) {
+                        console.warn('[Telegram] Notification error:', err.message);
+                    }
+                }
+                this.resolvedIds.add(i);
+                resolved++;
+            }
+            catch (err) {
+                console.warn(`[Resolver] Bet #${i} error: ${err.message}`);
+            }
+        }
+        const totalBets = maxBetId - 1;
+        console.log(`[Resolver] Scan: ${totalBets} total, ${active} active, ${resolved} resolved, ${backfilled} backfilled, ${noData} no data`);
+    }
+    async backfillBlocks(targetBlock) {
+        if (this.backfilling) {
+            console.log('[Resolver] Backfill already in progress');
+            return false;
+        }
+        this.backfilling = true;
+        try {
+            return await this._doBackfill(targetBlock);
+        }
+        finally {
+            this.backfilling = false;
+        }
+    }
+    async _doBackfill(targetBlock) {
+        let firstMissing = targetBlock;
+        for (let h = targetBlock; h > Math.max(targetBlock - 10, 0); h--) {
+            const data = await this.contract['getBlockData'](BigInt(h));
+            if ((BigInt(data.properties?.['dataSet'] ?? 0)) > 0n) {
+                firstMissing = h + 1;
+                break;
+            }
+            firstMissing = h;
+        }
+        if (firstMissing > targetBlock) {
+            console.log(`[Resolver] All blocks up to #${targetBlock} already have data`);
+            return true;
+        }
+        const blocksToFill = targetBlock - firstMissing + 1;
+        if (blocksToFill > 50) {
+            console.warn(`[Resolver] Too many blocks to backfill (${blocksToFill}), skipping`);
+            return false;
+        }
+        const medianFeeScaled = Math.round((this.oracle?.latestBtcFee ?? 0) * 100);
+        const mempoolCount = this.oracle?.latestMempoolCount ?? 0;
+        const timestamp = Math.floor(Date.now() / 1000);
+        console.log(`[Resolver] Backfilling blocks ${firstMissing} → ${targetBlock} (${blocksToFill} blocks)`);
+        for (let h = firstMissing; h <= targetBlock; h++) {
+            if (!this.running)
+                break;
+            try {
+                const existing = await this.contract['getBlockData'](BigInt(h));
+                if ((BigInt(existing.properties?.['dataSet'] ?? 0)) > 0n)
+                    continue;
+            }
+            catch { /* try anyway */ }
+            try {
+                const simulation = await this.contract['setBlockData'](BigInt(h), BigInt(medianFeeScaled), BigInt(mempoolCount), BigInt(timestamp));
+                if (simulation.revert) {
+                    console.error(`[Resolver] Backfill block #${h} reverted: ${simulation.revert}`);
+                    return false;
+                }
+                const challenge = await this.provider.getChallenge();
+                const receipt = await simulation.sendTransaction({
+                    signer: this.wallet.keypair,
+                    mldsaSigner: this.wallet.mldsaKeypair,
+                    refundTo: this.wallet.p2tr,
+                    maximumAllowedSatToSpend: CONFIG.maxSatsPerTx,
+                    network: this.network,
+                    feeRate: CONFIG.feeRate,
+                    challenge,
+                });
+                console.log(`[Resolver] Backfill block #${h} — TX: ${receipt.transactionId}`);
+                if (h < targetBlock)
+                    await new Promise(r => setTimeout(r, 5000));
+            }
+            catch (err) {
+                console.error(`[Resolver] Backfill block #${h} failed: ${err.message}`);
+                return false;
+            }
+        }
+        return true;
+    }
+}
+//# sourceMappingURL=resolver.js.map

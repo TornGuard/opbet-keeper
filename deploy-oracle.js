@@ -18,8 +18,62 @@ import 'dotenv/config';
 import { readFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import http from 'http';
+import https from 'https';
+import dns from 'dns';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ── Local IPv4 proxy ──────────────────────────────────────────────────────────
+// opnet's worker threads can't inherit patched undici agents, so we spin up a
+// tiny local HTTP proxy that forwards JSON-RPC calls using native https (which
+// connects via IPv4 — the behaviour we need on this host).
+async function startProxy(targetHost) {
+  // Resolve IPv4 address upfront — avoids race condition on first request
+  const resolvedIp = await new Promise((res, rej) =>
+    dns.resolve4(targetHost, (err, addrs) => (err ? rej(err) : res(addrs[0])))
+  );
+
+  const server = http.createServer((req, proxyRes) => {
+    let body = '';
+    req.on('data', chunk => (body += chunk));
+    req.on('end', () => {
+      const upstreamReq = https.request(
+        {
+          host:       resolvedIp,
+          port:       443,
+          path:       req.url,
+          method:     req.method,
+          servername: targetHost,          // SNI
+          headers: {
+            ...req.headers,
+            host:              targetHost,
+            'content-length':  Buffer.byteLength(body),
+            'accept-encoding': 'identity',   // no compression — proxy returns raw JSON
+          },
+        },
+        (upstreamRes) => {
+          let data = '';
+          upstreamRes.on('data', c => (data += c));
+          upstreamRes.on('end', () => {
+            proxyRes.writeHead(upstreamRes.statusCode, { 'content-type': 'application/json' });
+            proxyRes.end(data);
+          });
+        }
+      );
+      upstreamReq.on('error', (e) => {
+        proxyRes.writeHead(502);
+        proxyRes.end(JSON.stringify({ error: e.message }));
+      });
+      if (body) upstreamReq.write(body);
+      upstreamReq.end();
+    });
+  });
+
+  return new Promise((res) =>
+    server.listen(0, '127.0.0.1', () => res({ server, port: server.address().port }))
+  );
+}
 
 const { Mnemonic, MLDSASecurityLevel, AddressTypes, TransactionFactory, BinaryWriter } =
   await import('@btc-vision/transaction');
@@ -28,11 +82,11 @@ const { networks } = await import('@btc-vision/bitcoin');
 
 // ── Config ──────────────────────────────────────────────────────────────────
 const NETWORK    = networks.opnetTestnet;
-const RPC_URL    = process.env.OPNET_RPC_URL || 'https://testnet.opnet.org';
+const REMOTE_HOST = (process.env.OPNET_RPC_URL || 'https://testnet.opnet.org').replace('https://', '').replace('http://', '');
 const FEE_RATE   = Number(process.env.FEE_RATE) || 5;
 const GAS_SAT_FEE = 10_000n;
 
-const WASM_PATH = resolve(__dirname, '../contracts/oracle/build/PriceOracle.wasm');
+const WASM_PATH = resolve(__dirname, '../opbet-contracts-audit/build/PriceOracle.wasm');
 
 // ── Wallet ───────────────────────────────────────────────────────────────────
 function getWallet() {
@@ -43,8 +97,9 @@ function getWallet() {
 }
 
 // ── Provider ─────────────────────────────────────────────────────────────────
-function getProvider() {
-  return new JSONRpcProvider({ url: RPC_URL, network: NETWORK });
+function getProvider(proxyPort) {
+  const url = proxyPort ? `http://127.0.0.1:${proxyPort}` : `https://${REMOTE_HOST}`;
+  return new JSONRpcProvider({ url, network: NETWORK });
 }
 
 // ── Balance check ─────────────────────────────────────────────────────────────
@@ -67,7 +122,7 @@ async function deploy() {
   }
 
   const wallet   = getWallet();
-  const provider = getProvider();
+  const provider = getProvider(proxyPort);
 
   console.log('');
   console.log('  ╔══════════════════════════════════════╗');
@@ -91,8 +146,14 @@ async function deploy() {
   console.log(`Fee rate: ${FEE_RATE} sat/vB`);
   console.log('');
 
-  // PriceOracle.onDeployment() reads Blockchain.tx.sender — no calldata needed
-  const calldata = new BinaryWriter().getBuffer();
+  // PriceOracle.onDeployment() reads: minFeeders (u256), roundDuration (u256)
+  // minFeeders=1 for solo mode; roundDuration=0 uses contract default (60 blocks)
+  const MIN_FEEDERS    = BigInt(process.env.MIN_FEEDERS    || '1');
+  const ROUND_DURATION = BigInt(process.env.ROUND_DURATION || '0');
+  const cdWriter = new BinaryWriter();
+  cdWriter.writeU256(MIN_FEEDERS);
+  cdWriter.writeU256(ROUND_DURATION);
+  const calldata = cdWriter.getBuffer();
 
   const challenge = await provider.getChallenge();
   console.log('Challenge obtained');
@@ -171,17 +232,16 @@ function sleep(ms) {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 const command = process.argv[2];
+const { server: proxyServer, port: proxyPort } = await startProxy(REMOTE_HOST);
 
 if (command === 'balance') {
   const wallet   = getWallet();
-  const provider = getProvider();
-  checkBalance(wallet, provider).catch(err => {
-    console.error('Error:', err.message);
-    process.exit(1);
-  });
+  const provider = getProvider(proxyPort);
+  checkBalance(wallet, provider)
+    .catch(err => { console.error('Error:', err.message); process.exit(1); })
+    .finally(() => proxyServer.close());
 } else {
-  deploy().catch(err => {
-    console.error('Deployment failed:', err.message || err);
-    process.exit(1);
-  });
+  deploy()
+    .catch(err => { console.error('Deployment failed:', err.message || err); process.exit(1); })
+    .finally(() => proxyServer.close());
 }
