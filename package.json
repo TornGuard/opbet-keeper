@@ -1,20 +1,33 @@
 {
-  "name": "opbet-keeper",
+  "name": "blockfeed-keeper",
   "version": "1.0.0",
   "type": "module",
-  "description": "OP-BET Keeper Bot: Oracle feed + auto-resolve bets, persisted to Neon PostgreSQL",
+  "description": "BlockFeed Keeper — OPNet oracle price submitter and bet settlement bot",
   "main": "dist/index.js",
+  "bin": {
+    "blockfeed-keeper": "./bin/keeper.js"
+  },
+  "files": [
+    "dist/",
+    "bin/"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "node --watch dist/index.js",
-    "pm2": "pm2 start ecosystem.config.cjs",
-    "deploy:oracle": "node deploy-oracle.js",
-    "balance": "node deploy-oracle.js balance",
-    "presale-watcher": "node presale-watcher.js",
-    "presale-watcher:mainnet": "IS_MAINNET=1 node presale-watcher.js"
+    "pm2": "pm2 start ecosystem.config.cjs"
   },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "opnet",
+    "bitcoin",
+    "keeper",
+    "oracle",
+    "blockfeed"
+  ],
   "dependencies": {
     "@btc-vision/bitcoin": "latest",
     "@btc-vision/transaction": "latest",
