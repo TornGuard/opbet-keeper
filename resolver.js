@@ -12,6 +12,7 @@
 import { CONFIG } from './config.js';
 import { upsertBet, markBetResolved, upsertBetOwner, getBetWithWallet, getConsecutiveWins } from './db.js';
 import { notifyWin, notifyStreak } from './telegram.js';
+// WinNotifier in index.js now handles notifications — notifyWin/notifyStreak kept for legacy inline calls
 
 const STATUS_ACTIVE = 0n;
 
@@ -222,6 +223,45 @@ export class BetResolver {
     }
 
     console.log(`[Resolver] Scan: ${totalBets} total, ${active} active, ${resolved} resolved, ${backfilled} backfilled, ${noData} no data`);
+
+    // Flush accumulated staking fees to OPBET_Staking contract (non-blocking, best-effort)
+    if (resolved > 0 && CONFIG.stakingAddress) {
+      this._flushStakingFees().catch((err) =>
+        console.warn('[Resolver] flushStakingFees error:', err.message),
+      );
+    }
+  }
+
+  async _flushStakingFees() {
+    for (const tokenAddress of CONFIG.acceptedTokens) {
+      try {
+        const check = await this.contract.getPendingStakingFees(tokenAddress);
+        if (check.revert || !check.properties?.pending || check.properties.pending === 0n) continue;
+
+        const pending = check.properties.pending;
+        console.log(`[Resolver] Flushing ${pending} staking fees for token ${tokenAddress.slice(0, 12)}...`);
+
+        const simulation = await this.contract.flushStakingFees(tokenAddress);
+        if (simulation.revert) {
+          console.warn(`[Resolver] flushStakingFees simulation reverted: ${simulation.revert}`);
+          continue;
+        }
+
+        const challenge = await this.provider.getChallenge();
+        const receipt = await simulation.sendTransaction({
+          signer: this.wallet.keypair,
+          mldsaSigner: this.wallet.mldsaKeypair,
+          refundTo: this.wallet.p2tr,
+          maximumAllowedSatToSpend: CONFIG.maxSatsPerTx,
+          network: this.network,
+          feeRate: CONFIG.feeRate,
+          challenge,
+        });
+        console.log(`[Resolver] Staking fees flushed — TX: ${receipt.transactionId}`);
+      } catch (err) {
+        console.warn(`[Resolver] flushStakingFees for ${tokenAddress.slice(0, 12)} failed:`, err.message);
+      }
+    }
   }
 
   /**

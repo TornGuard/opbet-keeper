@@ -6,7 +6,7 @@
  */
 
 import http from 'http';
-import { pool, registerBetOwner, getBetsByWallet, getBetsByIds, getAllBettors, getRecentBets } from './db.js';
+import { pool, registerBetOwner, getBetsByWallet, getBetsByIds, getAllBettors, getRecentBets, getReferralStats } from './db.js';
 import { notifyEntry } from './telegram.js';
 
 const CORS_HEADERS = {
@@ -316,13 +316,13 @@ export function startHealthServer(oracle, resolver) {
       // ── POST /api/bets — frontend registers bet ownership ──
       if (req.method === 'POST' && url.pathname === '/api/bets') {
         const body = await readBody(req);
-        const { betId, wallet, txId, tokenSymbol, contractAddress, betType, param1, param2, amount, endBlock } = body;
+        const { betId, wallet, txId, tokenSymbol, contractAddress, betType, param1, param2, amount, endBlock, referrer } = body;
         if (!betId || !wallet) {
           res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'betId and wallet are required' }));
           return;
         }
-        await registerBetOwner({ betId: Number(betId), wallet, tokenSymbol, contractAddress });
+        await registerBetOwner({ betId: Number(betId), wallet, tokenSymbol, contractAddress, referrer: referrer || null });
 
         // Notify Telegram immediately on bet placement (tx just confirmed)
         if (betType !== undefined) {
@@ -388,6 +388,20 @@ export function startHealthServer(oracle, resolver) {
         );
         res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result.rows));
+        return;
+      }
+
+      // ── GET /api/referral?wallet=xxx — referral stats for a wallet ──
+      if (req.method === 'GET' && url.pathname === '/api/referral') {
+        const wallet = url.searchParams.get('wallet');
+        if (!wallet) {
+          res.writeHead(400, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'wallet required' }));
+          return;
+        }
+        const stats = await getReferralStats(wallet);
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(stats));
         return;
       }
 

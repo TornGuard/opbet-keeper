@@ -50,4 +50,13 @@ export const CONFIG = {
 
   // BlockFeed API base URL — used to read the latest BTC/USD price
   blockfeedApiUrl: process.env.BLOCKFEED_API_URL || 'http://localhost:3001',
+
+  // OPBET_Staking contract address (set after deployment)
+  stakingAddress: process.env.STAKING_ADDRESS || '',
+
+  // Accepted betting tokens — keeper flushes staking fees for each after resolving bets
+  acceptedTokens: [
+    process.env.OPBET_TOKEN_ADDRESS || 'opt1sqz7zu9777w66x3t5gqy8j6m62ege0af60yjlyrkm',
+    process.env.MOTO_TOKEN_ADDRESS  || 'opt1sqzkx6wm5acawl9m6nay2mjsm6wagv7gazcgtczds',
+  ],
 };

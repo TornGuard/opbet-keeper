@@ -130,4 +130,18 @@ export const MARKET_ABI = [
       { name: 'latestOracleFee', type: 'UINT256' },
     ],
   },
+  {
+    name: 'flushStakingFees',
+    type: 'function',
+    constant: false,
+    inputs: [{ name: 'token', type: 'ADDRESS' }],
+    outputs: [{ name: 'flushed', type: 'UINT256' }],
+  },
+  {
+    name: 'getPendingStakingFees',
+    type: 'function',
+    constant: true,
+    inputs: [{ name: 'token', type: 'ADDRESS' }],
+    outputs: [{ name: 'pending', type: 'UINT256' }],
+  },
 ];

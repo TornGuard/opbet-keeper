@@ -61,6 +61,7 @@ export async function initDb() {
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS param2 TEXT;`).catch(() => {});
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS owner_hex TEXT;`).catch(() => {});
   await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS contract_address TEXT;`).catch(() => {});
+  await pool.query(`ALTER TABLE bets ADD COLUMN IF NOT EXISTS referrer TEXT;`).catch(() => {});
 
   console.log('[DB] Tables ready');
 }
@@ -85,16 +86,34 @@ export async function upsertBet({ betId, betType, param1, param2, amount, endBlo
  * Called by the frontend after placing a bet — this is the source of truth
  * for "which bets belong to which wallet" since the contract doesn't store bettor address.
  */
-export async function registerBetOwner({ betId, wallet, tokenSymbol, contractAddress }) {
+export async function registerBetOwner({ betId, wallet, tokenSymbol, contractAddress, referrer }) {
   await pool.query(
-    `INSERT INTO bets (bet_id, wallet, token_symbol, contract_address)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO bets (bet_id, wallet, token_symbol, contract_address, referrer)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (bet_id) DO UPDATE
        SET wallet           = EXCLUDED.wallet,
            token_symbol     = COALESCE(EXCLUDED.token_symbol, bets.token_symbol),
-           contract_address = COALESCE(EXCLUDED.contract_address, bets.contract_address)`,
-    [betId, wallet.toLowerCase(), tokenSymbol || null, contractAddress || null],
+           contract_address = COALESCE(EXCLUDED.contract_address, bets.contract_address),
+           referrer         = COALESCE(bets.referrer, EXCLUDED.referrer)`,
+    [betId, wallet.toLowerCase(), tokenSymbol || null, contractAddress || null, referrer || null],
   );
+}
+
+/**
+ * Return referral stats for a wallet: who they invited and how many bets those referrals placed.
+ */
+export async function getReferralStats(wallet) {
+  const result = await pool.query(
+    `SELECT
+       COUNT(DISTINCT b.wallet)::int                                  AS referral_count,
+       COUNT(*)::int                                                  AS referred_bets,
+       COUNT(*) FILTER (WHERE b.won = true)::int                     AS referred_wins,
+       COALESCE(SUM(b.payout::numeric) FILTER (WHERE b.won = true), 0)::text AS referred_volume
+     FROM bets b
+     WHERE b.referrer = $1`,
+    [wallet.toLowerCase()],
+  );
+  return result.rows[0] || { referral_count: 0, referred_bets: 0, referred_wins: 0, referred_volume: '0' };
 }
 
 /**

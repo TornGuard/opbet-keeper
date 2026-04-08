@@ -22,6 +22,9 @@ import { PriceSubmitter } from './price-submitter.js';
 import { initDb } from './db.js';
 import { startHealthServer } from './health.js';
 import { notifyStartup } from './telegram.js';
+import { DailyDigest } from './daily-digest.js';
+import { WinNotifier } from './win-notifier.js';
+import { LeaderboardService } from './leaderboard-service.js';
 
 async function main() {
   if (!CONFIG.mnemonic && !CONFIG.deployerWif) {
@@ -144,6 +147,18 @@ async function main() {
     console.log('[PriceSubmitter] Deploy contracts/oracle/build/PriceOracle.wasm and set PRICE_ORACLE_ADDRESS');
   }
 
+  // Start daily digest (midnight UTC Telegram summary)
+  const digest = new DailyDigest();
+  digest.start();
+
+  // Start win notifier (polls DB every 30s, alerts winners on Telegram)
+  const winNotifier = new WinNotifier();
+  await winNotifier.start();
+
+  // Start weekly leaderboard (every Sunday midnight UTC)
+  const leaderboard = new LeaderboardService();
+  leaderboard.start();
+
   // Start health HTTP server
   startHealthServer(oracle, resolver);
 
@@ -155,6 +170,9 @@ async function main() {
     console.log('\n[Keeper] Shutting down...');
     oracle.stop();
     resolver.stop();
+    digest.stop();
+    winNotifier.stop();
+    leaderboard.stop();
     setTimeout(() => process.exit(0), 1000);
   };
   process.on('SIGINT', shutdown);
